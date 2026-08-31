@@ -121,10 +121,21 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [filterState, setFilterState] = useState<PropertyFilterState>(defaultFilterState);
 
-  // Helper to seed initial sample data into Firestore if empty
-  const seedInitialDataToFirestore = async () => {
+  // Helper to seed initial sample data into Firestore
+  const seedInitialDataToFirestore = async (forceCleanOld: boolean = false) => {
     if (!isFirebaseConfigured) return;
     try {
+      if (forceCleanOld) {
+        // Clean out old stale collections before seeding
+        const collectionsToClear = ['properties', 'users', 'teams', 'customers', 'appointments'];
+        for (const colName of collectionsToClear) {
+          const snap = await getDocs(collection(db, colName));
+          for (const docItem of snap.docs) {
+            await deleteDoc(doc(db, colName, docItem.id));
+          }
+        }
+      }
+
       // Seed users
       for (const u of SAMPLE_USERS) {
         await setDoc(doc(db, 'users', u.id), u, { merge: true });
@@ -254,8 +265,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setTeams(SAMPLE_TEAMS);
     setCustomers(SAMPLE_CUSTOMERS);
     setAppointments(SAMPLE_APPOINTMENTS);
-    seedInitialDataToFirestore();
-    success('Đã nạp lại dữ liệu chuẩn', 'Dữ liệu bất động sản, khách hàng và nhân sự đã được đồng bộ chuẩn Cloud.');
+    seedInitialDataToFirestore(true);
+    success('Đã nạp lại dữ liệu An Giang mới', 'Dữ liệu bất động sản, khách hàng và nhân sự An Giang đã được cập nhật.');
   };
 
   // Duplicate Check logic for Properties

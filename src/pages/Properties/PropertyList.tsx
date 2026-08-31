@@ -48,14 +48,14 @@ import { ConfirmModal } from '../../components/common/ConfirmModal';
 
 const VIETNAM_CITIES = [
   'Tất cả Tỉnh/TP',
+  'An Giang',
+  'Cần Thơ',
+  'Kiên Giang',
+  'Đồng Tháp',
   'Hồ Chí Minh',
   'Hà Nội',
   'Đà Nẵng',
   'Bình Dương',
-  'Đồng Nai',
-  'Bà Rịa - Vũng Tàu',
-  'Long An',
-  'Cần Thơ',
 ];
 
 const PROPERTY_TYPES: (PropertyType | 'ALL')[] = [

@@ -33,7 +33,7 @@ import { compressImage } from '../../utils/imageCompressor';
 import { uploadPropertyImage } from '../../utils/fileUpload';
 import { DuplicateWarningModal } from '../../components/common/DuplicateWarningModal';
 
-const VIETNAM_CITIES = ['Hồ Chí Minh', 'Hà Nội', 'Đà Nẵng', 'Bình Dương', 'Đồng Nai', 'Bà Rịa - Vũng Tàu', 'Long An', 'Cần Thơ'];
+const VIETNAM_CITIES = ['An Giang', 'Cần Thơ', 'Kiên Giang', 'Đồng Tháp', 'Hồ Chí Minh', 'Hà Nội', 'Đà Nẵng', 'Bình Dương'];
 const PROPERTY_TYPES: PropertyType[] = [
   'Nhà phố',
   'Căn hộ / Chung cư',
@@ -462,7 +462,7 @@ export const PropertyForm: React.FC = () => {
               <label className="block text-xs font-semibold text-slate-700 mb-1">Quận / Huyện *</label>
               <input
                 type="text"
-                placeholder="VD: Quận 1, Bình Thạnh, Cầu Giấy..."
+                placeholder="VD: TP Long Xuyên, TP Châu Đốc, Thoại Sơn..."
                 value={formData.district}
                 onChange={(e) => handleAddressFieldChange('district', e.target.value)}
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
@@ -473,7 +473,7 @@ export const PropertyForm: React.FC = () => {
               <label className="block text-xs font-semibold text-slate-700 mb-1">Phường / Xã</label>
               <input
                 type="text"
-                placeholder="VD: Phường Bến Nghé"
+                placeholder="VD: Phường Mỹ Bình, Núi Sam..."
                 value={formData.ward}
                 onChange={(e) => handleAddressFieldChange('ward', e.target.value)}
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
