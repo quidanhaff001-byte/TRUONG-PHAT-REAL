@@ -19,6 +19,8 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { Logo } from '../common/Logo';
+import { Avatar } from '../common/Avatar';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -65,18 +67,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
         }`}
       >
         {/* Brand Header */}
-        <div className="h-20 px-6 flex items-center justify-between border-b border-white/10 shrink-0 bg-[#001f3f]">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-[#D4AF37] rounded-xl flex items-center justify-center text-[#001f3f] font-black text-lg shadow-md shadow-amber-900/20 border border-[#D4AF37]/50">
-              TP
-            </div>
-            <div>
-              <div className="text-white font-black text-base tracking-tight flex items-center gap-1.5 leading-tight">
-                TRUONG PHAT REAL
-              </div>
-              <p className="text-[11px] text-[#D4AF37] font-medium">Bất Động Sản Chuyên Nghiệp</p>
-            </div>
-          </div>
+        <div className="h-20 px-5 flex items-center justify-between border-b border-white/10 shrink-0 bg-[#001f3f]">
+          <Logo variant="sidebar" />
 
           <button
             onClick={onClose}
@@ -90,21 +82,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
         {/* Current user mini card */}
         <div className="px-5 py-3.5 bg-black/20 border-b border-white/10 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="relative">
-              {currentUser?.avatarUrl ? (
-                <img
-                  src={currentUser.avatarUrl}
-                  alt={currentUser.fullName}
-                  referrerPolicy="no-referrer"
-                  className="w-10 h-10 rounded-full object-cover border-2 border-[#D4AF37]"
-                />
-              ) : (
-                <div className="w-10 h-10 rounded-full bg-[#00172e] text-[#D4AF37] border-2 border-[#D4AF37] flex items-center justify-center font-bold text-xs">
-                  {currentUser?.fullName?.charAt(0) || 'U'}
-                </div>
-              )}
-              <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 border-2 border-[#001f3f] rounded-full" />
-            </div>
+            <Avatar
+              src={currentUser?.avatarUrl}
+              name={currentUser?.fullName}
+              size="md"
+              status={currentUser?.status}
+              showStatusDot={true}
+              theme="gold"
+            />
             <div className="flex-1 min-w-0">
               <div className="text-xs font-bold text-white truncate">{currentUser?.fullName}</div>
               <div className="text-[11px] text-[#D4AF37] font-medium flex items-center gap-1">

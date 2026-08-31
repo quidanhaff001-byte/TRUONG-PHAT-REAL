@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -19,19 +19,28 @@ import {
   X,
   CheckCircle,
   TrendingUp,
+  Camera,
+  Upload,
+  Loader2,
 } from 'lucide-react';
 import { User, Team, UserRole } from '../../types';
 import { RoleBadge } from '../../components/common/Badge';
-import { formatDate } from '../../utils/formatters';
+import { Avatar } from '../../components/common/Avatar';
+import { uploadUserAvatar } from '../../utils/fileUpload';
 
 export const UserList: React.FC = () => {
-  const { users, teams, addUser, updateUser, toggleUserStatus, addTeam, updateTeam, deleteTeam } = useData();
+  const { users, teams, addUser, updateUser, updateUserAvatar, toggleUserStatus, addTeam, updateTeam, deleteTeam } = useData();
   const { currentUser, isAdmin } = useAuth();
-  const { success, error } = useToast();
+  const { success, error, info } = useToast();
 
   const [activeTab, setActiveTab] = useState<'users' | 'teams'>('users');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [roleFilter, setRoleFilter] = useState<string>('ALL');
+
+  // Avatar Upload State
+  const [avatarUploadingUserId, setAvatarUploadingUserId] = useState<string | null>(null);
+  const avatarFileInputRef = useRef<HTMLInputElement>(null);
+  const [selectedUserForAvatar, setSelectedUserForAvatar] = useState<User | null>(null);
 
   // User Modal State
   const [showUserModal, setShowUserModal] = useState<boolean>(false);
@@ -66,6 +75,41 @@ export const UserList: React.FC = () => {
     description: '',
     leaderId: '',
   });
+
+  // Check if current user can edit this target user's avatar
+  const canEditAvatar = (targetUser: User) => {
+    if (!currentUser) return false;
+    if (isAdmin) return true; // Admin can edit any avatar
+    return currentUser.id === targetUser.id; // Others can only edit their own avatar
+  };
+
+  const handleTriggerAvatarUpload = (user: User) => {
+    if (!canEditAvatar(user)) {
+      error('Không có quyền', 'Bạn chỉ có quyền thay đổi ảnh đại diện của chính mình.');
+      return;
+    }
+    setSelectedUserForAvatar(user);
+    avatarFileInputRef.current?.click();
+  };
+
+  const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedUserForAvatar) return;
+
+    try {
+      setAvatarUploadingUserId(selectedUserForAvatar.id);
+      const downloadUrl = await uploadUserAvatar(selectedUserForAvatar.id, file);
+      await updateUserAvatar(selectedUserForAvatar.id, downloadUrl);
+      success('Cập nhật ảnh thành công', `Đã cập nhật ảnh đại diện cho ${selectedUserForAvatar.fullName}.`);
+    } catch (err: any) {
+      console.error('Avatar upload error:', err);
+      error('Lỗi tải ảnh đại diện', err.message || 'Không thể tải ảnh. Vui lòng thử lại.');
+    } finally {
+      setAvatarUploadingUserId(null);
+      setSelectedUserForAvatar(null);
+      if (avatarFileInputRef.current) avatarFileInputRef.current.value = '';
+    }
+  };
 
   // Open Create/Edit User
   const handleOpenUserModal = (u?: User) => {
@@ -109,13 +153,15 @@ export const UserList: React.FC = () => {
         ...userFormData,
         teamName: team?.name,
       });
+      success('Thành công', 'Đã cập nhật thông tin nhân viên.');
     } else {
       await addUser({
         ...userFormData,
         teamName: team?.name,
         status: 'ACTIVE',
-        avatarUrl: `https://images.unsplash.com/photo-${1534528741775 + Math.floor(Math.random() * 1000)}?auto=format&fit=crop&w=200&q=80`,
+        avatarUrl: '', // Initial empty avatar triggers initials fallback
       });
+      success('Thành công', 'Đã tạo nhân viên mới.');
     }
     setShowUserModal(false);
   };
@@ -149,8 +195,10 @@ export const UserList: React.FC = () => {
 
     if (editingTeam) {
       await updateTeam(editingTeam.id, teamFormData);
+      success('Thành công', 'Đã cập nhật phòng ban.');
     } else {
       await addTeam(teamFormData);
+      success('Thành công', 'Đã tạo phòng ban mới.');
     }
     setShowTeamModal(false);
   };
@@ -172,6 +220,15 @@ export const UserList: React.FC = () => {
 
   return (
     <div className="space-y-5">
+      {/* Hidden File Input for Avatar Upload */}
+      <input
+        ref={avatarFileInputRef}
+        type="file"
+        accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+        onChange={handleAvatarFileChange}
+        className="hidden"
+      />
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -184,7 +241,7 @@ export const UserList: React.FC = () => {
             </span>
           </div>
           <p className="text-xs text-gray-500 mt-1">
-            Quản lý danh sách chuyên viên môi giới, phân quyền Quản trị viên, Trưởng nhóm và cấu trúc phòng ban.
+            Quản lý danh sách chuyên viên môi giới An Giang, phân quyền Quản trị viên, Trưởng nhóm và ảnh đại diện đồng bộ.
           </p>
         </div>
 
@@ -194,7 +251,7 @@ export const UserList: React.FC = () => {
               <button
                 type="button"
                 onClick={() => handleOpenUserModal()}
-                className="flex items-center gap-2 px-5 py-2.5 bg-[#001f3f] hover:bg-[#002e5c] text-white font-bold text-xs rounded-xl shadow-md transition-all active:scale-98"
+                className="flex items-center gap-2 px-5 py-2.5 bg-[#001f3f] hover:bg-[#002e5c] text-white font-bold text-xs rounded-xl shadow-md transition-all active:scale-98 cursor-pointer"
               >
                 <UserPlus className="w-4 h-4 text-[#D4AF37]" />
                 <span>Thêm nhân viên mới</span>
@@ -203,7 +260,7 @@ export const UserList: React.FC = () => {
               <button
                 type="button"
                 onClick={() => handleOpenTeamModal()}
-                className="flex items-center gap-2 px-5 py-2.5 bg-[#001f3f] hover:bg-[#002e5c] text-white font-bold text-xs rounded-xl shadow-md transition-all active:scale-98"
+                className="flex items-center gap-2 px-5 py-2.5 bg-[#001f3f] hover:bg-[#002e5c] text-white font-bold text-xs rounded-xl shadow-md transition-all active:scale-98 cursor-pointer"
               >
                 <Plus className="w-4 h-4 text-[#D4AF37]" />
                 <span>Tạo phòng ban / nhóm mới</span>
@@ -217,7 +274,7 @@ export const UserList: React.FC = () => {
       <div className="flex items-center gap-2 border-b border-gray-200">
         <button
           onClick={() => setActiveTab('users')}
-          className={`px-4 py-2.5 text-xs font-bold border-b-2 transition-all flex items-center gap-2 ${
+          className={`px-4 py-2.5 text-xs font-bold border-b-2 transition-all flex items-center gap-2 cursor-pointer ${
             activeTab === 'users'
               ? 'border-[#001f3f] text-[#001f3f]'
               : 'border-transparent text-gray-500 hover:text-gray-900'
@@ -228,7 +285,7 @@ export const UserList: React.FC = () => {
         </button>
         <button
           onClick={() => setActiveTab('teams')}
-          className={`px-4 py-2.5 text-xs font-bold border-b-2 transition-all flex items-center gap-2 ${
+          className={`px-4 py-2.5 text-xs font-bold border-b-2 transition-all flex items-center gap-2 cursor-pointer ${
             activeTab === 'teams'
               ? 'border-[#001f3f] text-[#001f3f]'
               : 'border-transparent text-gray-500 hover:text-gray-900'
@@ -274,6 +331,8 @@ export const UserList: React.FC = () => {
             {filteredUsers.map((u) => {
               const isLocked = u.status === 'LOCKED';
               const isSelf = currentUser?.id === u.id;
+              const hasAvatarPermission = canEditAvatar(u);
+              const isUploadingThis = avatarUploadingUserId === u.id;
 
               return (
                 <div
@@ -285,12 +344,35 @@ export const UserList: React.FC = () => {
                   <div>
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-center gap-3">
-                        <img
-                          src={u.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80'}
-                          alt={u.fullName}
-                          referrerPolicy="no-referrer"
-                          className="w-12 h-12 rounded-full object-cover border border-gray-200 ring-2 ring-[#D4AF37]/30"
-                        />
+                        {/* Avatar with click-to-upload trigger if permitted */}
+                        <div className="relative group">
+                          <Avatar
+                            src={u.avatarUrl}
+                            name={u.fullName}
+                            size="lg"
+                            status={u.status}
+                            theme="gold"
+                          />
+
+                          {/* Upload overlay button */}
+                          {hasAvatarPermission && !isUploadingThis && (
+                            <button
+                              type="button"
+                              onClick={() => handleTriggerAvatarUpload(u)}
+                              title={isAdmin && !isSelf ? `Đổi ảnh cho ${u.fullName}` : 'Đổi ảnh đại diện của bạn'}
+                              className="absolute inset-0 rounded-full bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition-opacity cursor-pointer"
+                            >
+                              <Camera className="w-4 h-4" />
+                            </button>
+                          )}
+
+                          {isUploadingThis && (
+                            <div className="absolute inset-0 rounded-full bg-black/70 flex items-center justify-center text-[#D4AF37]">
+                              <Loader2 className="w-5 h-5 animate-spin" />
+                            </div>
+                          )}
+                        </div>
+
                         <div>
                           <div className="flex items-center gap-1.5">
                             <h3 className="text-xs font-black text-gray-900">{u.fullName}</h3>
@@ -342,38 +424,61 @@ export const UserList: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Action row (Admin only) */}
-                  {isAdmin && (
-                    <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between">
-                      <button
-                        onClick={() => toggleUserStatus(u.id)}
-                        disabled={isSelf}
-                        className={`text-xs font-bold flex items-center gap-1 transition-colors ${
-                          isLocked ? 'text-emerald-600 hover:text-emerald-700' : 'text-rose-600 hover:text-rose-700'
-                        } disabled:opacity-30`}
-                      >
-                        {isLocked ? (
-                          <>
-                            <Unlock className="w-3.5 h-3.5" />
-                            <span>Mở khóa</span>
-                          </>
-                        ) : (
-                          <>
-                            <Lock className="w-3.5 h-3.5" />
-                            <span>Khóa tài khoản</span>
-                          </>
-                        )}
-                      </button>
+                  {/* Action row (Admin or Self) */}
+                  <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between">
+                    {isAdmin ? (
+                      <>
+                        <button
+                          onClick={() => toggleUserStatus(u.id)}
+                          disabled={isSelf}
+                          className={`text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer ${
+                            isLocked ? 'text-emerald-600 hover:text-emerald-700' : 'text-rose-600 hover:text-rose-700'
+                          } disabled:opacity-30 disabled:cursor-not-allowed`}
+                        >
+                          {isLocked ? (
+                            <>
+                              <Unlock className="w-3.5 h-3.5" />
+                              <span>Mở khóa</span>
+                            </>
+                          ) : (
+                            <>
+                              <Lock className="w-3.5 h-3.5" />
+                              <span>Khóa tài khoản</span>
+                            </>
+                          )}
+                        </button>
 
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleTriggerAvatarUpload(u)}
+                            className="p-1.5 text-gray-500 hover:text-[#001f3f] hover:bg-gray-100 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                            title="Đổi ảnh đại diện"
+                          >
+                            <Camera className="w-3.5 h-3.5 text-[#b38e22]" />
+                            <span className="hidden sm:inline">Đổi ảnh</span>
+                          </button>
+
+                          <button
+                            onClick={() => handleOpenUserModal(u)}
+                            className="p-1.5 text-gray-600 hover:text-[#001f3f] hover:bg-gray-100 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                          >
+                            <Edit className="w-3.5 h-3.5 text-[#D4AF37]" />
+                            <span>Sửa</span>
+                          </button>
+                        </div>
+                      </>
+                    ) : isSelf ? (
                       <button
-                        onClick={() => handleOpenUserModal(u)}
-                        className="p-1.5 text-gray-600 hover:text-[#001f3f] hover:bg-gray-100 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors"
+                        onClick={() => handleTriggerAvatarUpload(u)}
+                        className="text-xs font-bold text-[#001f3f] hover:text-[#b38e22] flex items-center gap-1.5 cursor-pointer"
                       >
-                        <Edit className="w-3.5 h-3.5 text-[#D4AF37]" />
-                        <span>Sửa</span>
+                        <Camera className="w-3.5 h-3.5 text-[#b38e22]" />
+                        <span>Đổi ảnh đại diện của bạn</span>
                       </button>
-                    </div>
-                  )}
+                    ) : (
+                      <span className="text-[11px] text-gray-400 italic">Chỉ xem thông tin</span>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -413,13 +518,13 @@ export const UserList: React.FC = () => {
                 <div className="pt-3 border-t border-gray-100 flex items-center justify-end gap-2">
                   <button
                     onClick={() => handleOpenTeamModal(t)}
-                    className="px-3 py-1.5 text-xs font-bold text-[#001f3f] bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                    className="px-3 py-1.5 text-xs font-bold text-[#001f3f] bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors cursor-pointer"
                   >
                     Chỉnh sửa
                   </button>
                   <button
                     onClick={() => deleteTeam(t.id)}
-                    className="p-1.5 text-gray-400 hover:text-rose-600 rounded-lg transition-colors"
+                    className="p-1.5 text-gray-400 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
                     title="Xóa nhóm"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -488,7 +593,7 @@ export const UserList: React.FC = () => {
                   <label className="block font-bold text-gray-700 mb-1">Email đăng nhập *</label>
                   <input
                     type="email"
-                    placeholder="name@vinareal.vn"
+                    placeholder="name@truongphatreal.vn"
                     value={userFormData.email}
                     onChange={(e) => setUserFormData({ ...userFormData, email: e.target.value })}
                     className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl font-medium"
@@ -528,7 +633,7 @@ export const UserList: React.FC = () => {
                   rows={2}
                   value={userFormData.notes}
                   onChange={(e) => setUserFormData({ ...userFormData, notes: e.target.value })}
-                  placeholder="Khu vực chuyên trách, kinh nghiệm..."
+                  placeholder="Khu vực chuyên trách Long Xuyên, Châu Đốc..."
                   className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl font-medium"
                 />
               </div>
@@ -575,7 +680,7 @@ export const UserList: React.FC = () => {
                 <label className="block font-bold text-gray-700 mb-1">Tên phòng ban / nhóm *</label>
                 <input
                   type="text"
-                  placeholder="VD: KD1 - Trung tâm & Nhà phố"
+                  placeholder="VD: KD1 - TP. Long Xuyên"
                   value={teamFormData.name}
                   onChange={(e) => setTeamFormData({ ...teamFormData, name: e.target.value })}
                   className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl font-semibold"
@@ -604,7 +709,7 @@ export const UserList: React.FC = () => {
                   rows={3}
                   value={teamFormData.description}
                   onChange={(e) => setTeamFormData({ ...teamFormData, description: e.target.value })}
-                  placeholder="Phụ trách khu vực Quận 1, 3, 5 phân khúc cao cấp..."
+                  placeholder="Phụ trách khu vực TP. Long Xuyên và Châu Đốc..."
                   className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl font-medium"
                 />
               </div>

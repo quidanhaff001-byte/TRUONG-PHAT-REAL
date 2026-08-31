@@ -11,6 +11,7 @@ import {
   PhoneCall,
   X,
 } from 'lucide-react';
+import { Logo } from '../../components/common/Logo';
 
 export const Login: React.FC = () => {
   const { loginWithEmail, resetPassword } = useAuth();
@@ -76,17 +77,7 @@ export const Login: React.FC = () => {
       {/* Main Centered Content */}
       <div className="w-full max-w-[460px] my-auto relative z-10 flex flex-col items-center">
         {/* 1, 2, 3: Header Branding: Logo TP, Name, Short Description */}
-        <div className="text-center mb-6 sm:mb-8 flex flex-col items-center">
-          <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-br from-[#D4AF37] via-[#e5c158] to-[#b38e22] flex items-center justify-center text-[#00172e] font-black text-2xl sm:text-3xl shadow-lg shadow-amber-950/40 border border-[#D4AF37]/60 mb-3.5 transition-transform hover:scale-105">
-            TP
-          </div>
-          <h1 className="text-xl sm:text-2xl font-black text-white tracking-wider uppercase">
-            TRUONG PHAT REAL
-          </h1>
-          <p className="text-xs sm:text-sm text-slate-400 mt-1 font-medium">
-            Hệ thống quản lý bất động sản nội bộ
-          </p>
-        </div>
+        <Logo variant="login" className="mb-6 sm:mb-8" />
 
         {/* 4: Centered Login Box */}
         <div className="w-full bg-[#0B1528] border border-[#1E3A5F] rounded-[24px] shadow-2xl shadow-black/50 p-6 sm:p-8 backdrop-blur-md">

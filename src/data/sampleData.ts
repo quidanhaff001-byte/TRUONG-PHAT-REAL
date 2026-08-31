@@ -1,4 +1,17 @@
-import { User, Team, Property, Customer, Appointment } from '../types';
+import { User, Team, Property, Customer, Appointment, SystemSettings } from '../types';
+
+export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
+  id: 'general',
+  companyName: 'TRUONG PHAT REAL',
+  companySlogan: 'Hệ thống quản lý bất động sản nội bộ',
+  logoUrl: '',
+  hotline: '0919 414 884',
+  address: 'Số 68 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh & Chi nhánh An Giang',
+  website: 'https://truongphatreal.vn',
+  email: 'quidanh.aff001@gmail.com',
+  updatedAt: '2026-01-01T00:00:00Z',
+  updatedBy: 'Hệ thống',
+};
 
 export const SAMPLE_USERS: User[] = [
   {
@@ -7,7 +20,6 @@ export const SAMPLE_USERS: User[] = [
     fullName: 'Nguyễn Văn Quản Trị',
     email: 'quidanh.aff001@gmail.com',
     phone: '0919 414 884',
-    avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
     role: 'ADMIN',
     status: 'ACTIVE',
     startDate: '2022-01-01',
@@ -23,7 +35,6 @@ export const SAMPLE_USERS: User[] = [
     fullName: 'Trần Thị Thu Hà',
     email: 'thuha.tran@truongphatreal.vn',
     phone: '0912 345 678',
-    avatarUrl: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80',
     role: 'TEAM_LEADER',
     teamId: 'team_01',
     teamName: 'Nhóm Kinh Doanh 1 - TP Long Xuyên',
@@ -41,7 +52,6 @@ export const SAMPLE_USERS: User[] = [
     fullName: 'Lê Hoàng Nam',
     email: 'hoangnam.le@truongphatreal.vn',
     phone: '0938 111 222',
-    avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
     role: 'AGENT',
     teamId: 'team_01',
     teamName: 'Nhóm Kinh Doanh 1 - TP Long Xuyên',
@@ -61,7 +71,6 @@ export const SAMPLE_USERS: User[] = [
     fullName: 'Phạm Minh Đức',
     email: 'minhduc.pham@truongphatreal.vn',
     phone: '0977 444 555',
-    avatarUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
     role: 'AGENT',
     teamId: 'team_02',
     teamName: 'Nhóm Kinh Doanh 2 - TP Châu Đốc & Du lịch Núi Sam',
@@ -79,7 +88,6 @@ export const SAMPLE_USERS: User[] = [
     fullName: 'Vũ Thùy Linh',
     email: 'thuylinh.vu@truongphatreal.vn',
     phone: '0988 666 777',
-    avatarUrl: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&auto=format&fit=crop&q=80',
     role: 'AGENT',
     teamId: 'team_02',
     teamName: 'Nhóm Kinh Doanh 2 - TP Châu Đốc & Du lịch Núi Sam',
@@ -97,7 +105,6 @@ export const SAMPLE_USERS: User[] = [
     fullName: 'Đỗ Tuấn Kiệt',
     email: 'tuankiet.do@truongphatreal.vn',
     phone: '0966 222 333',
-    avatarUrl: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150&auto=format&fit=crop&q=80',
     role: 'AGENT',
     teamId: 'team_03',
     teamName: 'Nhóm Kinh Doanh 3 - TX Tân Châu & Khu Công Nghiệp',

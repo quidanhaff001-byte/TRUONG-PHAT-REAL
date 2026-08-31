@@ -10,13 +10,14 @@ import {
   CustomerInteraction,
   Appointment,
   AuditLog,
+  SystemSettings,
 } from '../types';
-import { SAMPLE_PROPERTIES, SAMPLE_USERS, SAMPLE_TEAMS, SAMPLE_CUSTOMERS, SAMPLE_APPOINTMENTS } from '../data/sampleData';
+import { SAMPLE_PROPERTIES, SAMPLE_USERS, SAMPLE_TEAMS, SAMPLE_CUSTOMERS, SAMPLE_APPOINTMENTS, DEFAULT_SYSTEM_SETTINGS } from '../data/sampleData';
 import { useAuth } from './AuthContext';
 import { useToast } from './ToastContext';
 import { generatePropertyCode } from '../utils/formatters';
 import { isFirebaseConfigured, db } from '../config/firebase';
-import { collection, onSnapshot, doc, setDoc, updateDoc, deleteDoc, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, doc, setDoc, updateDoc, deleteDoc, getDocs, getDoc } from 'firebase/firestore';
 
 export interface DuplicateCheckResult {
   isDuplicate: boolean;
@@ -36,6 +37,7 @@ interface DataContextType {
   teams: Team[];
   customers: Customer[];
   appointments: Appointment[];
+  systemSettings: SystemSettings;
   isLoading: boolean;
   filterState: PropertyFilterState;
   setFilterState: React.Dispatch<React.SetStateAction<PropertyFilterState>>;
@@ -57,6 +59,7 @@ interface DataContextType {
   // User Actions
   addUser: (userData: Omit<User, 'id' | 'createdAt'>) => Promise<User>;
   updateUser: (id: string, userData: Partial<User>) => Promise<void>;
+  updateUserAvatar: (userId: string, avatarUrl: string | null) => Promise<void>;
   toggleUserStatus: (id: string) => Promise<void>;
   
   // Team Actions
@@ -82,6 +85,10 @@ interface DataContextType {
   updateAppointment: (id: string, data: Partial<Appointment>) => Promise<void>;
   deleteAppointment: (id: string) => Promise<void>;
   
+  // Settings Actions
+  updateSystemSettings: (data: Partial<SystemSettings>) => Promise<void>;
+  restoreDefaultLogo: () => Promise<void>;
+
   // Reset / Seed
   seedInitialDataToFirestore: () => Promise<void>;
   resetDemoData: () => void;
@@ -117,6 +124,14 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [teams, setTeams] = useState<Team[]>(SAMPLE_TEAMS);
   const [customers, setCustomers] = useState<Customer[]>(SAMPLE_CUSTOMERS);
   const [appointments, setAppointments] = useState<Appointment[]>(SAMPLE_APPOINTMENTS);
+  const [systemSettings, setSystemSettings] = useState<SystemSettings>(() => {
+    try {
+      const saved = localStorage.getItem('tp_system_settings');
+      return saved ? { ...DEFAULT_SYSTEM_SETTINGS, ...JSON.parse(saved) } : DEFAULT_SYSTEM_SETTINGS;
+    } catch {
+      return DEFAULT_SYSTEM_SETTINGS;
+    }
+  });
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [filterState, setFilterState] = useState<PropertyFilterState>(defaultFilterState);
@@ -135,6 +150,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           }
         }
       }
+
+      // Seed settings
+      await setDoc(doc(db, 'settings', 'general'), DEFAULT_SYSTEM_SETTINGS, { merge: true });
 
       // Seed users
       for (const u of SAMPLE_USERS) {
@@ -170,6 +188,24 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     setIsLoading(true);
+
+    // 0. System Settings listener
+    const unsubSettings = onSnapshot(
+      doc(db, 'settings', 'general'),
+      (snapshot) => {
+        if (snapshot.exists()) {
+          const loaded = { ...DEFAULT_SYSTEM_SETTINGS, ...snapshot.data() } as SystemSettings;
+          setSystemSettings(loaded);
+          localStorage.setItem('tp_system_settings', JSON.stringify(loaded));
+        } else {
+          // Initialize settings doc if doesn't exist
+          setDoc(doc(db, 'settings', 'general'), DEFAULT_SYSTEM_SETTINGS, { merge: true }).catch(console.error);
+        }
+      },
+      (err) => {
+        console.warn('Firestore settings snapshot notice:', err.message);
+      }
+    );
 
     // 1. Properties realtime listener
     const unsubProps = onSnapshot(
@@ -247,6 +283,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     );
 
     return () => {
+      unsubSettings();
       unsubProps();
       unsubUsers();
       unsubTeams();
@@ -265,6 +302,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setTeams(SAMPLE_TEAMS);
     setCustomers(SAMPLE_CUSTOMERS);
     setAppointments(SAMPLE_APPOINTMENTS);
+    setSystemSettings(DEFAULT_SYSTEM_SETTINGS);
+    localStorage.setItem('tp_system_settings', JSON.stringify(DEFAULT_SYSTEM_SETTINGS));
     seedInitialDataToFirestore(true);
     success('Đã nạp lại dữ liệu An Giang mới', 'Dữ liệu bất động sản, khách hàng và nhân sự An Giang đã được cập nhật.');
   };
@@ -614,6 +653,60 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     }
     success('Cập nhật nhân sự thành công');
+  };
+
+  const updateUserAvatar = async (userId: string, avatarUrl: string | null): Promise<void> => {
+    const updatedPayload = { avatarUrl: avatarUrl ? avatarUrl : '' };
+    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, ...updatedPayload } : u)));
+    if (isFirebaseConfigured) {
+      try {
+        await updateDoc(doc(db, 'users', userId), updatedPayload);
+      } catch (err) {
+        console.error('Error updating user avatar in firestore:', err);
+      }
+    }
+    success(avatarUrl ? 'Cập nhật ảnh đại diện thành công' : 'Đã xóa ảnh đại diện, sử dụng chữ cái đầu');
+  };
+
+  // System Settings management (Firestore synced)
+  const updateSystemSettings = async (data: Partial<SystemSettings>): Promise<void> => {
+    const updated = {
+      ...systemSettings,
+      ...data,
+      updatedAt: new Date().toISOString(),
+      updatedBy: currentUser?.fullName || 'Quản trị viên',
+    };
+    setSystemSettings(updated);
+    localStorage.setItem('tp_system_settings', JSON.stringify(updated));
+
+    if (isFirebaseConfigured) {
+      try {
+        await setDoc(doc(db, 'settings', 'general'), updated, { merge: true });
+      } catch (err) {
+        console.error('Error updating system settings in firestore:', err);
+      }
+    }
+    success('Cập nhật thông tin hệ thống thành công');
+  };
+
+  const restoreDefaultLogo = async (): Promise<void> => {
+    const updated = {
+      ...systemSettings,
+      logoUrl: '',
+      updatedAt: new Date().toISOString(),
+      updatedBy: currentUser?.fullName || 'Quản trị viên',
+    };
+    setSystemSettings(updated);
+    localStorage.setItem('tp_system_settings', JSON.stringify(updated));
+
+    if (isFirebaseConfigured) {
+      try {
+        await updateDoc(doc(db, 'settings', 'general'), { logoUrl: '' });
+      } catch (err) {
+        console.error('Error restoring default logo in firestore:', err);
+      }
+    }
+    info('Đã khôi phục logo mặc định TP màu vàng');
   };
 
   const toggleUserStatus = async (id: string): Promise<void> => {
@@ -1073,6 +1166,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         teams,
         customers,
         appointments,
+        systemSettings,
         isLoading,
         filterState,
         setFilterState,
@@ -1090,6 +1184,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         checkDuplicateProperty,
         addUser,
         updateUser,
+        updateUserAvatar,
         toggleUserStatus,
         addTeam,
         updateTeam,
@@ -1108,6 +1203,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         addAppointment,
         updateAppointment,
         deleteAppointment,
+        updateSystemSettings,
+        restoreDefaultLogo,
         seedInitialDataToFirestore,
         resetDemoData,
       }}

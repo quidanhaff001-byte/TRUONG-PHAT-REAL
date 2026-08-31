@@ -391,3 +391,17 @@ export interface AuditLog {
   oldData?: any;
   newData?: any;
 }
+
+export interface SystemSettings {
+  id: string;
+  companyName: string;
+  companySlogan: string;
+  logoUrl?: string;
+  hotline: string;
+  address: string;
+  website?: string;
+  email?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+

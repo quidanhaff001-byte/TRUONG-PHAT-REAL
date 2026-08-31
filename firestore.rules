@@ -84,6 +84,12 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // System Settings (Logo, Branding & Company Config)
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
     // System Health & Pings
     match /system_health/{id} {
       allow read, write: if true;

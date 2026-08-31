@@ -164,13 +164,17 @@ export const printPropertyListReport = (properties: Property[], title = 'BÁO C�
       </head>
       <body>
         <div class="header">
-          <div>
-            <h1>${title}</h1>
-            <div class="meta">Hệ thống Quản lý Bất Động Sản TRUONG PHAT REAL | Kỹ thuật: 0919 414 884 | Ngày in: ${new Date().toLocaleString('vi-VN')}</div>
+          <div style="display: flex; align-items: center; gap: 14px;">
+            <div style="width: 44px; height: 44px; border-radius: 10px; background: #D4AF37; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 20px; color: #00172e; font-family: sans-serif; border: 1px solid #b38e22;">TP</div>
+            <div>
+              <h1 style="margin: 0; font-size: 16px; color: #001f3f; font-weight: 900;">${title}</h1>
+              <div class="meta" style="margin-top: 3px;">TRUONG PHAT REAL • Hệ thống Quản trị Bất Động Sản An Giang • Hotline: 0919 414 884</div>
+            </div>
           </div>
           <div style="text-align: right;">
             <div style="font-weight: bold; color: #001f3f;">Tổng số: ${properties.length} sản phẩm</div>
-            <button onclick="window.print()" style="margin-top: 5px; padding: 6px 14px; background: #001f3f; color: #fff; border: none; border-radius: 6px; cursor: pointer;">In Báo Cáo</button>
+            <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Ngày in: ${new Date().toLocaleString('vi-VN')}</div>
+            <button onclick="window.print()" style="margin-top: 6px; padding: 6px 14px; background: #001f3f; color: #D4AF37; font-weight: bold; border: none; border-radius: 6px; cursor: pointer;">In Báo Cáo</button>
           </div>
         </div>
 

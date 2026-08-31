@@ -14,7 +14,7 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import { RoleBadge } from '../common/Badge';
-import { SAMPLE_USERS } from '../../data/sampleData';
+import { Avatar } from '../common/Avatar';
 
 interface NavbarProps {
   onToggleSidebar: () => void;
@@ -22,7 +22,7 @@ interface NavbarProps {
 
 export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
   const { currentUser, isFirebaseActive, switchDemoUser, logout } = useAuth();
-  const { filterState, setFilterState, resetDemoData } = useData();
+  const { users, filterState, setFilterState, resetDemoData } = useData();
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [showDemoSelector, setShowDemoSelector] = useState(false);
 
@@ -98,18 +98,13 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
               </div>
             </div>
 
-            {currentUser?.avatarUrl ? (
-              <img
-                src={currentUser.avatarUrl}
-                alt={currentUser.fullName}
-                referrerPolicy="no-referrer"
-                className="w-10 h-10 rounded-full object-cover border-2 border-[#D4AF37] shadow-xs"
-              />
-            ) : (
-              <div className="w-10 h-10 rounded-full bg-[#001f3f] text-white flex items-center justify-center font-bold text-sm border-2 border-[#D4AF37]">
-                {currentUser?.fullName?.charAt(0) || 'U'}
-              </div>
-            )}
+            <Avatar
+              src={currentUser?.avatarUrl}
+              name={currentUser?.fullName}
+              size="md"
+              status={currentUser?.status}
+              theme="navy"
+            />
           </button>
 
           {/* User Dropdown */}
@@ -158,7 +153,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
             <h3 className="text-base font-bold text-slate-900 mb-1 flex items-center gap-2">
-              <UserCheck className="w-5 h-5 text-amber-600" />
+              <UserCheck className="w-5 h-5 text-[#b38e22]" />
               Chọn tài khoản thử nghiệm
             </h3>
             <p className="text-xs text-slate-500 mb-4">
@@ -166,7 +161,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
             </p>
 
             <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
-              {SAMPLE_USERS.map((user) => {
+              {users.map((user) => {
                 const isCurrent = currentUser?.id === user.id;
                 return (
                   <button
@@ -177,15 +172,15 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
                     }}
                     className={`w-full p-3 rounded-xl border text-left flex items-center gap-3 transition-all ${
                       isCurrent
-                        ? 'border-amber-500 bg-amber-50/50 ring-2 ring-amber-500/20'
+                        ? 'border-[#D4AF37] bg-amber-50/50 ring-2 ring-[#D4AF37]/30'
                         : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
                     }`}
                   >
-                    <img
+                    <Avatar
                       src={user.avatarUrl}
-                      alt={user.fullName}
-                      referrerPolicy="no-referrer"
-                      className="w-10 h-10 rounded-full object-cover border border-slate-200 shrink-0"
+                      name={user.fullName}
+                      size="md"
+                      status={user.status}
                     />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
