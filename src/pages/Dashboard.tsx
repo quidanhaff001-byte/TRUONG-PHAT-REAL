@@ -33,8 +33,8 @@ import {
 
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
-  const { properties, users, teams } = useData();
-  const { currentUser, isAdmin, isTeamLeader } = useAuth();
+  const { properties, customers, appointments, transactions, rentalDeals, rentalContracts, commissions } = useData();
+  const { currentUser, isTeamLeader } = useAuth();
 
   const activeProperties = properties.filter((p) => !p.isDeleted);
   const totalCount = activeProperties.length;
@@ -42,7 +42,9 @@ export const Dashboard: React.FC = () => {
   const saleCount = activeProperties.filter((p) => p.transactionType === 'SALE' || p.transactionType === 'SALE_AND_RENT').length;
   const rentCount = activeProperties.filter((p) => p.transactionType === 'RENT' || p.transactionType === 'SALE_AND_RENT').length;
   const transferCount = activeProperties.filter((p) => p.transactionType === 'TRANSFER').length;
-  const depositCount = activeProperties.filter((p) => p.status.includes('nhận cọc') || p.status.includes('giữ chỗ')).length;
+  const pendingAppointments = appointments.filter((a) => a.status === 'Đã lên lịch').length;
+  const activeTransactions = transactions.filter((t) => t.status !== 'Hoàn tất' && t.status !== 'Hủy cọc').length;
+  const activeRentContracts = rentalContracts.filter((c) => c.status === 'Đang hiệu lực').length;
 
   // Chart Data: Transaction Breakdown
   const transactionChartData = [
@@ -72,14 +74,13 @@ export const Dashboard: React.FC = () => {
     <div className="space-y-6">
       {/* Welcome Banner / Header matching theme */}
       <div className="bg-[#001f3f] rounded-2xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden border border-white/10">
-        {/* Background decorative gold glow */}
         <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 bg-[#D4AF37]/15 rounded-full blur-3xl pointer-events-none" />
 
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="space-y-2">
             <div className="flex items-center gap-2">
               <span className="px-3 py-1 rounded-full text-xs font-bold bg-[#D4AF37]/20 text-[#D4AF37] border border-[#D4AF37]/40">
-                VinaReal Pro Enterprise
+                TRƯỜNG PHÁT REAL • ENTERPRISE
               </span>
               <span className="text-xs text-gray-300">
                 • {new Date().toLocaleDateString('vi-VN', { weekday: 'long', day: 'numeric', month: 'numeric', year: 'numeric' })}
@@ -89,14 +90,21 @@ export const Dashboard: React.FC = () => {
               Xin chào, {currentUser?.fullName}! 👋
             </h1>
             <p className="text-xs sm:text-sm text-gray-300 max-w-xl">
-              Hệ thống hiện đang quản lý <strong className="text-[#D4AF37] font-bold">{totalCount} nguồn hàng</strong> sẵn sàng phân phối và chốt giao dịch.
+              Hệ thống hiện đang quản lý <strong className="text-[#D4AF37] font-bold">{totalCount} nguồn hàng</strong>, <strong className="text-[#D4AF37] font-bold">{pendingAppointments} cuộc hẹn</strong> và <strong className="text-[#D4AF37] font-bold">{activeTransactions} giao dịch</strong> đang xử lý.
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              onClick={() => navigate('/match')}
+              className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-xl border border-white/20 transition-all active:scale-98"
+            >
+              <Sparkles className="w-4 h-4 text-[#D4AF37]" />
+              <span>Ghép Nhu Cầu</span>
+            </button>
             <button
               onClick={() => navigate('/properties/new')}
-              className="flex items-center gap-2 px-5 py-3 bg-[#D4AF37] hover:bg-[#c49f2c] text-[#001f3f] font-bold text-xs rounded-xl shadow-lg shadow-amber-900/20 transition-all active:scale-98 whitespace-nowrap"
+              className="flex items-center gap-2 px-4 py-2.5 bg-[#D4AF37] hover:bg-[#c49f2c] text-[#001f3f] font-bold text-xs rounded-xl shadow-lg transition-all active:scale-98 whitespace-nowrap"
             >
               <PlusCircle className="w-4 h-4" />
               <span>Tiếp nhận nguồn hàng mới</span>
@@ -105,79 +113,61 @@ export const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* 4 Core Summary KPI Cards matching Design HTML */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+      {/* 4 Core Summary KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
         {/* Card 1: Nguồn hàng mới */}
         <div
           onClick={() => navigate('/properties')}
-          className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm hover:border-[#D4AF37]/60 transition-all cursor-pointer group"
+          className="bg-white p-5 rounded-2xl border border-gray-200 shadow-xs hover:border-[#D4AF37]/60 transition-all cursor-pointer group"
         >
-          <div className="text-gray-500 text-sm font-medium mb-1">Nguồn hàng mới</div>
+          <div className="text-gray-500 text-xs font-semibold mb-1">Nguồn hàng ký gửi</div>
           <div className="flex items-end justify-between">
-            <div className="text-3xl font-bold text-[#001f3f]">{totalCount}</div>
-            <div className="text-green-600 text-sm font-semibold flex items-center">
-              +12.5%
-              <TrendingUp className="w-4 h-4 ml-0.5" />
-            </div>
+            <div className="text-2xl font-bold text-[#001f3f]">{totalCount}</div>
+            <div className="text-xs text-slate-500 font-semibold">{saleCount} Bán / {rentCount} Thuê</div>
           </div>
         </div>
 
-        {/* Card 2: Ký gửi Cho thuê */}
+        {/* Card 2: Lịch hẹn */}
         <div
-          onClick={() => navigate('/properties')}
-          className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm hover:border-[#D4AF37]/60 transition-all cursor-pointer group"
+          onClick={() => navigate('/appointments')}
+          className="bg-white p-5 rounded-2xl border border-gray-200 shadow-xs hover:border-[#D4AF37]/60 transition-all cursor-pointer group"
         >
-          <div className="text-gray-500 text-sm font-medium mb-1">Nguồn hàng Cho thuê</div>
+          <div className="text-gray-500 text-xs font-semibold mb-1">Lịch hẹn khảo sát</div>
           <div className="flex items-end justify-between">
-            <div className="text-3xl font-bold text-[#001f3f]">{rentCount}</div>
-            <div className="text-green-600 text-sm font-semibold flex items-center">
-              +5.2%
-              <TrendingUp className="w-4 h-4 ml-0.5" />
+            <div className="text-2xl font-bold text-[#001f3f]">{pendingAppointments}</div>
+            <div className="text-amber-600 text-xs font-bold flex items-center">
+              Đang chờ dẫn khách
             </div>
           </div>
         </div>
 
-        {/* Card 3: Giao dịch chốt */}
+        {/* Card 3: Giao dịch Mua bán & Sang nhượng */}
         <div
-          onClick={() => navigate('/properties')}
-          className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm hover:border-[#D4AF37]/60 transition-all cursor-pointer group"
+          onClick={() => navigate('/sales')}
+          className="bg-white p-5 rounded-2xl border border-gray-200 shadow-xs hover:border-[#D4AF37]/60 transition-all cursor-pointer group"
         >
-          <div className="text-gray-500 text-sm font-medium mb-1">Ký gửi Bán & Sang nhượng</div>
+          <div className="text-gray-500 text-xs font-semibold mb-1">Giao dịch đang tiến hành</div>
           <div className="flex items-end justify-between">
-            <div className="text-3xl font-bold text-[#001f3f]">{saleCount + transferCount}</div>
-            <div className="text-[#001f3f]/60 text-xs font-semibold uppercase tracking-wider">
-              {saleCount} Bán / {transferCount} Sang
+            <div className="text-2xl font-bold text-[#001f3f]">{activeTransactions}</div>
+            <div className="text-emerald-600 text-xs font-bold">
+              Tiến độ 6 bước
             </div>
           </div>
         </div>
 
-        {/* Card 4: Highlight Gold Card per Professional Polish design */}
-        {isTeamLeader ? (
-          <div className="bg-[#D4AF37] p-6 rounded-2xl border border-amber-400 shadow-lg flex flex-col justify-between">
-            <div>
-              <div className="text-[#001f3f]/70 text-sm font-bold mb-1">Hoa hồng thực nhận</div>
-              <div className="text-3xl font-bold text-[#001f3f]">1.25B VNĐ</div>
-            </div>
-            <div className="text-[#001f3f]/70 text-xs font-bold mt-2 uppercase">
-              Kỳ quyết toán: Tháng {new Date().getMonth() + 1}/{new Date().getFullYear()}
-            </div>
+        {/* Card 4: Hợp đồng thuê */}
+        <div
+          onClick={() => navigate('/contracts')}
+          className="bg-[#D4AF37] p-5 rounded-2xl border border-amber-400 shadow-xs flex flex-col justify-between cursor-pointer"
+        >
+          <div>
+            <div className="text-[#001f3f]/70 text-xs font-bold mb-1">Hợp đồng thuê đang chạy</div>
+            <div className="text-2xl font-bold text-[#001f3f]">{activeRentContracts} HĐ</div>
           </div>
-        ) : (
-          <div
-            onClick={() => navigate('/properties')}
-            className="bg-[#D4AF37] p-6 rounded-2xl border border-amber-400 shadow-lg flex flex-col justify-between cursor-pointer"
-          >
-            <div>
-              <div className="text-[#001f3f]/70 text-sm font-bold mb-1">Nguồn hàng của bạn</div>
-              <div className="text-3xl font-bold text-[#001f3f]">
-                {activeProperties.filter((p) => p.assignedAgentId === currentUser?.id || p.createdBy === currentUser?.id).length}
-              </div>
-            </div>
-            <div className="text-[#001f3f]/70 text-xs font-bold mt-2 uppercase">
-              Đang phụ trách & tiếp cận khách
-            </div>
+          <div className="text-[#001f3f]/80 text-[11px] font-bold mt-1 uppercase">
+            Quản lý kỳ thanh toán
           </div>
-        )}
+        </div>
       </div>
 
       {/* Visual Charts Grid: 2 Columns */}

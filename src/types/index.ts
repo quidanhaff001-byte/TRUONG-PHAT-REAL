@@ -80,7 +80,9 @@ export type PropertyStatus =
   | 'Đã nhận cọc'
   | 'Đã đặt cọc'
   | 'Đã công chứng'
+  | 'Đã bán'
   | 'Đã cho thuê'
+  | 'Đã sang nhượng'
   | 'Đã bàn giao'
   | 'Đã hoàn tất'
   | 'Tạm ngưng'
@@ -111,6 +113,22 @@ export interface PropertyImage {
   name?: string;
   size?: number;
   isCover?: boolean;
+}
+
+export interface PropertyImageItem {
+  id: string;
+  propertyId: string;
+  fileName: string;
+  storagePath: string;
+  downloadURL: string;
+  contentType: string;
+  size: number;
+  width?: number;
+  height?: number;
+  isCover: boolean;
+  sortOrder: number;
+  uploadedAt: string;
+  uploadedBy: string;
 }
 
 export interface Property {
@@ -158,8 +176,9 @@ export interface Property {
   amenities?: string[];
   
   // Media
-  images?: string[] | PropertyImage[] | any[];
+  images?: string[] | any[];
   coverImage?: string;
+  imageDetails?: PropertyImageItem[];
   videoUrl?: string;
   
   // Legal
@@ -297,8 +316,11 @@ export interface Customer {
   demandType: 'MUA' | 'THUE' | 'SANG_NHUONG';
   propertyTypes: PropertyCategory[];
   areas: string[];
+  preferredDistricts?: string[];
   minPrice: number;
   maxPrice: number;
+  budgetMin?: number;
+  budgetMax?: number;
   minArea?: number;
   maxArea?: number;
   potentialLevel: 'Nóng' | 'Tiềm năng' | 'Tham khảo' | 'Chưa phù hợp' | 'Ngưng chăm sóc';
@@ -338,26 +360,6 @@ export interface CustomerFilterState {
   isDeleted?: boolean;
 }
 
-export interface Appointment {
-  id: string;
-  title: string;
-  type: 'Dẫn khách xem' | 'Gặp chủ nhà' | 'Khảo sát sản phẩm' | 'Đặt cọc' | 'Ký hợp đồng' | 'Công chứng' | 'Gọi lại' | 'Khác';
-  customerId?: string;
-  customerName?: string;
-  propertyId?: string;
-  propertyCode?: string;
-  propertyTitle?: string;
-  assignedAgentId: string;
-  agentName?: string;
-  startDateTime: string;
-  endDateTime: string;
-  location?: string;
-  content: string;
-  status: 'Chờ diễn ra' | 'Đã hoàn thành' | 'Đã hủy' | 'Dời lịch';
-  resultNotes?: string;
-  createdAt: string;
-}
-
 export interface PropertyFilterState {
   searchQuery: string;
   transactionType: string;
@@ -377,19 +379,481 @@ export interface PropertyFilterState {
   hasImagesOnly?: boolean;
 }
 
+export type AppointmentType =
+  | 'Gọi lại cho khách'
+  | 'Gửi sản phẩm'
+  | 'Gặp khách'
+  | 'Gặp chủ bất động sản'
+  | 'Khảo sát nguồn hàng'
+  | 'Chụp hình'
+  | 'Dẫn khách xem'
+  | 'Thương lượng'
+  | 'Đặt cọc'
+  | 'Ký hợp đồng'
+  | 'Công chứng'
+  | 'Bàn giao'
+  | 'Thu tiền thuê'
+  | 'Gia hạn hợp đồng'
+  | 'Thanh lý hợp đồng'
+  | 'Công việc khác';
+
+export type AppointmentStatus =
+  | 'Sắp tới'
+  | 'Đang thực hiện'
+  | 'Đã hoàn thành'
+  | 'Khách hủy'
+  | 'Môi giới hủy'
+  | 'Dời lịch'
+  | 'Quá hạn';
+
+export interface Appointment {
+  id: string;
+  code?: string;
+  title: string;
+  type: AppointmentType | string;
+  customerId?: string;
+  customerName?: string;
+  customerPhone?: string;
+  propertyId?: string;
+  propertyCode?: string;
+  propertyTitle?: string;
+  transactionId?: string;
+  contractId?: string;
+  assignedAgentId: string;
+  agentName?: string;
+  participantIds?: string[];
+  participantNames?: string[];
+  startDate?: string;
+  startTime?: string;
+  endDate?: string;
+  endTime?: string;
+  startDateTime: string;
+  endDateTime: string;
+  location?: string;
+  googleMapsUrl?: string;
+  content: string;
+  reminderMinutes?: number;
+  status: AppointmentStatus;
+  resultNotes?: string;
+  customerFeedback?: string;
+  nextAction?: string;
+  notes?: string;
+  teamId?: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
+  createdAt: string;
+  createdBy?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export interface PropertyMatch {
+  id: string;
+  customerId: string;
+  customerName?: string;
+  propertyId: string;
+  propertyCode?: string;
+  propertyTitle?: string;
+  matchScore: number;
+  matchedCriteria: string[];
+  unmatchedCriteria: string[];
+  sentAt?: string;
+  sentBy?: string;
+  sentByName?: string;
+  response?: string;
+  responseStatus?: 'CHUA_PHAN_HOI' | 'THICH' | 'KHONG_PHU_HOP' | 'HEN_XEM' | 'DA_CHOT';
+  favorite?: boolean;
+  note?: string;
+  assignedAgentId?: string;
+  teamId?: string;
+  createdAt: string;
+  createdBy?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+  deletedAt?: string;
+  deletedBy?: string;
+}
+
+export type TransactionSaleStatus =
+  | 'Đang tư vấn'
+  | 'Đang xem sản phẩm'
+  | 'Đang thương lượng'
+  | 'Đã giữ chỗ'
+  | 'Đã đặt cọc'
+  | 'Đang làm thủ tục'
+  | 'Đã công chứng'
+  | 'Chờ bàn giao'
+  | 'Hoàn tất'
+  | 'Hủy giữ chỗ'
+  | 'Hủy cọc'
+  | 'Giao dịch thất bại';
+
+export interface Transaction {
+  id: string;
+  code: string;
+  type: 'SALE' | 'TRANSFER';
+  propertyId: string;
+  propertyCode: string;
+  propertyTitle: string;
+  propertyAddress?: string;
+  customerId: string;
+  customerName: string;
+  customerPhone?: string;
+  ownerId?: string;
+  ownerName: string;
+  ownerPhone: string;
+  responsibleAgentId: string;
+  responsibleAgentName: string;
+  cooperatingAgentIds?: string[];
+  cooperatingAgentNames?: string[];
+  teamId?: string;
+  teamName?: string;
+  
+  // Financials
+  ownerListingPrice: number;
+  listedPrice: number;
+  finalPrice: number;
+  holdingDeposit?: number;
+  depositAmount: number;
+  
+  // Timeline
+  holdingDate?: string;
+  depositDate: string;
+  estimatedNotaryDate?: string;
+  actualNotaryDate?: string;
+  handoverDate?: string;
+  
+  // Details
+  taxPayer: 'BEN_BAN' | 'BEN_MUA' | 'HAI_BEN_THOA_THUAN';
+  estimatedExpenses?: number;
+  actualExpenses?: number;
+  estimatedCommission: number;
+  actualCommission: number;
+  paymentTerms?: string;
+  notes?: string;
+  documents?: string[];
+  status: TransactionSaleStatus;
+  step?: number;
+  
+  // System tracking
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
+  deleteReason?: string;
+  createdAt: string;
+  createdBy?: string;
+  updatedAt: string;
+  updatedBy?: string;
+}
+
+export type RentalDealStatus =
+  | 'Mới tiếp nhận'
+  | 'Đã gửi sản phẩm'
+  | 'Đã xem nhà'
+  | 'Đang thương lượng'
+  | 'Đã giữ chỗ'
+  | 'Đã đặt cọc'
+  | 'Chuẩn bị hợp đồng'
+  | 'Đã ký'
+  | 'Đã bàn giao'
+  | 'Hoàn tất'
+  | 'Hủy';
+
+export interface RentalDeal {
+  id: string;
+  code: string;
+  propertyId: string;
+  propertyCode: string;
+  propertyTitle: string;
+  propertyAddress?: string;
+  customerId: string;
+  customerName: string;
+  customerPhone?: string;
+  ownerId?: string;
+  ownerName: string;
+  ownerPhone: string;
+  responsibleAgentId: string;
+  responsibleAgentName: string;
+  teamId?: string;
+  teamName?: string;
+  
+  // Rent Specs
+  monthlyRent: number;
+  holdingDeposit?: number;
+  depositAmount: number;
+  depositMonths: number;
+  paymentCycle: '1_THANG' | '3_THANG' | '6_THANG' | '12_THANG' | string;
+  paymentCycleMonths?: number;
+  tenantId?: string;
+  tenantName?: string;
+  tenantPhone?: string;
+  sellingAgentId?: string;
+  sellingAgentName?: string;
+  handoverDate?: string;
+  leaseStartDate?: string;
+  leaseTermMonths: number;
+  leaseEndDate?: string;
+  
+  // Fees & Utilities
+  managementFee?: number;
+  electricityPrice?: string;
+  waterPrice?: string;
+  internetPrice?: string;
+  parkingFee?: string;
+  otherFees?: string;
+  furnitureHandover?: string;
+  leaseConditions?: string;
+  
+  estimatedCommission: number;
+  actualCommission: number;
+  status: RentalDealStatus;
+  step?: number;
+  notes?: string;
+  documents?: string[];
+  rentalContractId?: string;
+  
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
+  deleteReason?: string;
+  createdAt: string;
+  createdBy?: string;
+  updatedAt: string;
+  updatedBy?: string;
+}
+
+export type RentalContractStatus =
+  | 'Bản nháp'
+  | 'Chờ ký'
+  | 'Chờ nhận nhà'
+  | 'Đang hiệu lực'
+  | 'Sắp hết hạn'
+  | 'Chờ gia hạn'
+  | 'Đã gia hạn'
+  | 'Chờ thanh lý'
+  | 'Đã thanh lý'
+  | 'Đã hủy';
+
+export interface RentalContract {
+  id: string;
+  code: string;
+  propertyId: string;
+  propertyCode: string;
+  propertyTitle: string;
+  propertyAddress: string;
+  customerId: string;
+  customerName: string;
+  customerPhone: string;
+  customerIdentityNumber?: string;
+  ownerId?: string;
+  ownerName: string;
+  ownerPhone: string;
+  ownerIdentityNumber?: string;
+  rentalDealId?: string;
+  assignedAgentId: string;
+  assignedAgentName: string;
+  teamId?: string;
+  teamName?: string;
+  
+  signingDate: string;
+  startDate: string;
+  endDate: string;
+  monthlyRent: number;
+  depositAmount: number;
+  depositMonths: number;
+  paymentCycle: string;
+  firstPaymentDate: string;
+  nextPaymentDate: string;
+  allowedLateDays: number;
+  priceEscalationPolicy?: string;
+  noticePeriodDays: number;
+  
+  furnitureList?: string;
+  electricMeterStart?: string;
+  waterMeterStart?: string;
+  handoverCondition?: string;
+  commissionAmount: number;
+  contractFileUrl?: string;
+  handoverRecordUrl?: string;
+  conditionImages?: string[];
+  notes?: string;
+  status: RentalContractStatus;
+  
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
+  deleteReason?: string;
+  createdAt: string;
+  createdBy?: string;
+  updatedAt: string;
+  updatedBy?: string;
+}
+
+export type RentalPaymentStatus =
+  | 'Chưa đến hạn'
+  | 'Sắp đến hạn'
+  | 'Đến hạn'
+  | 'Đã thanh toán'
+  | 'Thanh toán một phần'
+  | 'Quá hạn'
+  | 'Được miễn'
+  | 'Đã hủy';
+
+export interface RentalPayment {
+  id: string;
+  contractId: string;
+  contractCode: string;
+  cycleNumber: number;
+  periodName: string;
+  fromDate: string;
+  toDate: string;
+  dueDate: string;
+  rentAmount: number;
+  surcharges?: number;
+  deductions?: number;
+  totalAmount: number;
+  paidAmount: number;
+  remainingAmount: number;
+  paidDate?: string;
+  paymentMethod?: 'TIEN_MAT' | 'CHUYEN_KHOAN' | 'KHAC';
+  receiptUrl?: string;
+  status: RentalPaymentStatus;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CommissionDealType = 'SALE' | 'TRANSFER' | 'RENT';
+
+export type CommissionStatus =
+  | 'Dự kiến'
+  | 'Chờ thu'
+  | 'Đã thu một phần'
+  | 'Đã thu đủ'
+  | 'Chờ chia'
+  | 'Đã chia một phần'
+  | 'Đã chia đủ'
+  | 'Bị hủy';
+
+export type CommissionSplitRole =
+  | 'CONG_TY'
+  | 'NGUOI_LAY_NGUON'
+  | 'NGUOI_BAN_HANG'
+  | 'NGUOI_PHOI_HOP'
+  | 'TRUONG_NHOM'
+  | 'KHAC';
+
+export interface CommissionSplit {
+  id: string;
+  commissionId: string;
+  userId: string;
+  userName: string;
+  userRole: string;
+  roleInDeal: CommissionSplitRole;
+  percentage: number;
+  amount: number;
+  isPaid: boolean;
+  paidDate?: string;
+  receiptUrl?: string;
+  notes?: string;
+}
+
+export interface Commission {
+  id: string;
+  code: string;
+  dealType: CommissionDealType;
+  dealId: string;
+  dealCode: string;
+  dealTitle: string;
+  propertyId: string;
+  propertyCode: string;
+  customerId?: string;
+  customerName?: string;
+  
+  totalExpectedCommission: number;
+  totalActualCommission: number;
+  expectedDate?: string;
+  actualReceivedDate?: string;
+  payerName: string;
+  status: CommissionStatus;
+  expensesDeducted: number;
+  netCommission: number;
+  notes?: string;
+  receiptUrls?: string[];
+  splits: CommissionSplit[];
+  
+  assignedAgentId?: string;
+  teamId?: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
+  createdAt: string;
+  createdBy?: string;
+  updatedAt: string;
+  updatedBy?: string;
+}
+
+export type CommissionRecord = Commission;
+
+export type AuditLogLevel = 'INFO' | 'WARNING' | 'CRITICAL';
+
 export interface AuditLog {
   id: string;
   timestamp: string;
-  userId: string;
-  userName: string;
-  userEmail: string;
-  action: 'CREATE' | 'UPDATE' | 'DELETE' | 'RESTORE' | 'LOGIN' | 'ASSIGN' | 'VIEW_SENSITIVE' | 'LOCK_USER';
-  module: 'PROPERTIES' | 'CUSTOMERS' | 'USERS' | 'TEAMS' | 'TRANSACTIONS';
-  targetId: string;
+  userId?: string;
+  userName?: string;
+  userEmail?: string;
+  userRole?: string;
+  teamId?: string;
+  action:
+    | 'CREATE'
+    | 'UPDATE'
+    | 'DELETE'
+    | 'RESTORE'
+    | 'LOGIN'
+    | 'LOGOUT'
+    | 'ASSIGN'
+    | 'VIEW_SENSITIVE'
+    | 'LOCK_USER'
+    | 'CHANGE_ROLE'
+    | 'SETTINGS_CHANGE'
+    | 'SPLIT_COMMISSION'
+    | 'STATUS_CHANGE';
+  module:
+    | 'PROPERTIES'
+    | 'CUSTOMERS'
+    | 'USERS'
+    | 'TEAMS'
+    | 'TRANSACTIONS'
+    | 'RENTALS'
+    | 'CONTRACTS'
+    | 'COMMISSIONS'
+    | 'APPOINTMENTS'
+    | 'MATCHES'
+    | 'SETTINGS'
+    | 'AUTH';
+  recordId?: string;
+  recordCode?: string;
+  recordName?: string;
+  targetId?: string;
   targetCode?: string;
   description: string;
   oldData?: any;
   newData?: any;
+  level?: AuditLogLevel;
+  deviceInfo?: string;
+}
+
+export interface Notification {
+  id: string;
+  title: string;
+  content: string;
+  type: 'APPOINTMENT' | 'PROPERTY' | 'CUSTOMER' | 'DEAL' | 'CONTRACT' | 'PAYMENT' | 'COMMISSION' | 'SYSTEM';
+  link: string;
+  recipientId: string; // 'all' or userId
+  isRead: boolean;
+  createdAt: string;
 }
 
 export interface SystemSettings {

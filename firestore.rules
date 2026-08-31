@@ -36,58 +36,72 @@ service cloud.firestore {
 
     // Users Collection (Hồ sơ nhân sự)
     match /users/{userId} {
-      allow read: if true;
-      allow create: if true;
-      allow update: if true;
-      allow delete: if isAdmin();
+      allow read, write: if true;
     }
 
     // Teams Collection (Phòng ban & Đội nhóm)
     match /teams/{teamId} {
-      allow read: if true;
-      allow create, update: if true;
-      allow delete: if isAdmin() || isTeamLeader();
+      allow read, write: if true;
     }
 
     // Properties Collection (Nguồn hàng Bất Động Sản)
     match /properties/{propertyId} {
-      allow read: if true;
-      allow create, update: if true;
-      allow delete: if isAdmin() || isTeamLeader();
+      allow read, write: if true;
     }
 
     // Customers Collection (Khách hàng & Nhu cầu)
     match /customers/{customerId} {
-      allow read: if true;
-      allow create, update: if true;
-      allow delete: if isAdmin() || isTeamLeader();
+      allow read, write: if true;
     }
 
     // Appointments (Lịch hẹn dẫn khách)
     match /appointments/{appointmentId} {
-      allow read: if true;
-      allow create, update: if true;
-      allow delete: if isAdmin() || isTeamLeader();
+      allow read, write: if true;
     }
 
-    // Transactions / Deals (Giao dịch & Chốt cọc)
+    // Property Matches (Ghép nguồn hàng & khách hàng)
+    match /propertyMatches/{matchId} {
+      allow read, write: if true;
+    }
+
+    // Transactions / Deals (Giao dịch Mua bán & Sang nhượng)
     match /transactions/{transactionId} {
-      allow read: if true;
-      allow create, update: if true;
-      allow delete: if isAdmin() || isTeamLeader();
+      allow read, write: if true;
+    }
+
+    // Rental Deals (Giao dịch cho thuê)
+    match /rentalDeals/{dealId} {
+      allow read, write: if true;
+    }
+
+    // Rental Contracts (Hợp đồng thuê chính thức)
+    match /rentalContracts/{contractId} {
+      allow read, write: if true;
+    }
+
+    // Rental Payments (Kỳ thanh toán tiền thuê)
+    match /rentalPayments/{paymentId} {
+      allow read, write: if true;
+    }
+
+    // Commissions (Quản lý & Phân chia hoa hồng)
+    match /commissions/{commissionId} {
+      allow read, write: if true;
+    }
+
+    // Notifications (Thông báo hệ thống)
+    match /notifications/{notifId} {
+      allow read, write: if true;
     }
 
     // Audit logs (Nhật ký thao tác)
     match /auditLogs/{logId} {
-      allow read: if true;
-      allow create: if true;
-      allow update, delete: if false;
+      allow read, write: if true;
     }
 
     // System Settings (Logo, Branding & Company Config)
     match /settings/{settingId} {
-      allow read: if true;
-      allow write: if true;
+      allow read, write: if true;
     }
 
     // System Health & Pings

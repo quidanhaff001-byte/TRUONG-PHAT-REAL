@@ -6,28 +6,49 @@ service firebase.storage {
     }
 
     function isImage() {
-      return request.resource.contentType.matches('image/.*');
+      return request.resource == null || (
+        request.resource.contentType.matches('image/(jpeg|jpg|png|webp|svg\\+xml)') ||
+        request.resource.contentType.matches('image/.*')
+      );
     }
 
     function isUnderMaxSize() {
-      return request.resource.size < 10 * 1024 * 1024; // 10MB
+      return request.resource == null || request.resource.size <= 10 * 1024 * 1024; // 10MB Max
     }
 
-    // Property images
+    // Property images: Publicly viewable for listings, restricted write to signed-in users with 10MB limit & image MIME types
     match /properties/{propertyId}/images/{fileName} {
-      allow read: if isSignedIn();
+      allow read: if true;
       allow write: if isSignedIn() && isImage() && isUnderMaxSize();
+      allow delete: if isSignedIn();
     }
 
-    // Property legal documents
+    // Property legal documents (Sổ hồng, hợp đồng pháp lý)
     match /properties/{propertyId}/documents/{fileName} {
-      allow read, write: if isSignedIn() && isUnderMaxSize();
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isUnderMaxSize();
+      allow delete: if isSignedIn();
     }
 
-    // User avatars
+    match /legal_docs/{propertyId}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isUnderMaxSize();
+      allow delete: if isSignedIn();
+    }
+
+    // System settings and company branding logos
+    match /settings/{fileName} {
+      allow read: if true;
+      allow write: if isSignedIn() && isUnderMaxSize();
+      allow delete: if isSignedIn();
+    }
+
+    // User profile avatars
     match /users/{userId}/{fileName} {
       allow read: if true;
-      allow write: if isSignedIn() && (request.auth.uid == userId || isImage()) && isUnderMaxSize();
+      allow write: if isSignedIn() && isUnderMaxSize();
+      allow delete: if isSignedIn();
     }
   }
 }
+

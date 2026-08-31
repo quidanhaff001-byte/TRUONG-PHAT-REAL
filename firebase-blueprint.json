@@ -149,6 +149,133 @@
         "createdAt": { "type": "string", "maxLength": 50 }
       },
       "required": ["id", "title", "startDateTime", "assignedAgentId"]
+    },
+    "PropertyMatch": {
+      "title": "PropertyMatch",
+      "description": "Kết quả ghép nối giữa BĐS và khách hàng",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "propertyId": { "type": "string", "maxLength": 128 },
+        "customerId": { "type": "string", "maxLength": 128 },
+        "matchScore": { "type": "number" },
+        "matchedAt": { "type": "string", "maxLength": 50 },
+        "status": { "type": "string", "maxLength": 50 },
+        "notes": { "type": "string", "maxLength": 1000 }
+      },
+      "required": ["id", "propertyId", "customerId"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Giao dịch mua bán và sang nhượng bất động sản",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "code": { "type": "string", "maxLength": 50 },
+        "propertyId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "maxLength": 50 },
+        "currentStep": { "type": "number" },
+        "dealPrice": { "type": "number" },
+        "depositAmount": { "type": "number" },
+        "commissionTotal": { "type": "number" }
+      },
+      "required": ["id", "code", "propertyId", "status"]
+    },
+    "RentalDeal": {
+      "title": "RentalDeal",
+      "description": "Giao dịch cho thuê BĐS",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "code": { "type": "string", "maxLength": 50 },
+        "propertyId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "maxLength": 50 },
+        "monthlyRent": { "type": "number" },
+        "depositAmount": { "type": "number" }
+      },
+      "required": ["id", "code", "propertyId", "status"]
+    },
+    "RentalContract": {
+      "title": "RentalContract",
+      "description": "Hợp đồng thuê BĐS chính thức",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "contractCode": { "type": "string", "maxLength": 50 },
+        "propertyId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "maxLength": 50 },
+        "monthlyRent": { "type": "number" }
+      },
+      "required": ["id", "contractCode", "propertyId", "status"]
+    },
+    "RentalPayment": {
+      "title": "RentalPayment",
+      "description": "Kỳ thanh toán tiền thuê",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "contractId": { "type": "string", "maxLength": 128 },
+        "amount": { "type": "number" },
+        "status": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "contractId", "amount", "status"]
+    },
+    "Commission": {
+      "title": "Commission",
+      "description": "Khoản hoa hồng và phân chia",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "code": { "type": "string", "maxLength": 50 },
+        "totalAmount": { "type": "number" },
+        "status": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "code", "totalAmount", "status"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Nhật ký kiểm toán thao tác hệ thống",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "timestamp": { "type": "string", "maxLength": 50 },
+        "action": { "type": "string", "maxLength": 50 },
+        "description": { "type": "string", "maxLength": 1000 }
+      },
+      "required": ["id", "timestamp", "action", "description"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Thông báo nội bộ",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "content": { "type": "string", "maxLength": 1000 },
+        "isRead": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "title", "content"]
+    },
+    "SystemSettings": {
+      "title": "SystemSettings",
+      "description": "Cài đặt hệ thống, nhận diện thương hiệu và thông tin doanh nghiệp",
+      "type": "object",
+      "properties": {
+        "companyName": { "type": "string", "maxLength": 200 },
+        "companySlogan": { "type": "string", "maxLength": 300 },
+        "hotline": { "type": "string", "maxLength": 50 },
+        "address": { "type": "string", "maxLength": 300 },
+        "website": { "type": "string", "maxLength": 200 },
+        "email": { "type": "string", "maxLength": 150 },
+        "logoUrl": { "type": "string", "maxLength": 500 },
+        "watermarkText": { "type": "string", "maxLength": 100 },
+        "currency": { "type": "string", "maxLength": 20 },
+        "areaUnit": { "type": "string", "maxLength": 20 },
+        "enableWatermark": { "type": "boolean" },
+        "enableAutoDuplicateCheck": { "type": "boolean" },
+        "enableAgentPhoneMasking": { "type": "boolean" }
+      }
     }
   },
   "firestore": {
@@ -171,6 +298,42 @@
     "/appointments/{appointmentId}": {
       "schema": "Appointment",
       "description": "Lịch hẹn dẫn khách xem nhà"
+    },
+    "/propertyMatches/{matchId}": {
+      "schema": "PropertyMatch",
+      "description": "Danh sách kết quả ghép BĐS và khách hàng"
+    },
+    "/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Giao dịch mua bán sang nhượng"
+    },
+    "/rentalDeals/{dealId}": {
+      "schema": "RentalDeal",
+      "description": "Giao dịch cho thuê BĐS"
+    },
+    "/rentalContracts/{contractId}": {
+      "schema": "RentalContract",
+      "description": "Hợp đồng thuê BĐS"
+    },
+    "/rentalPayments/{paymentId}": {
+      "schema": "RentalPayment",
+      "description": "Thanh toán hợp đồng thuê"
+    },
+    "/commissions/{commissionId}": {
+      "schema": "Commission",
+      "description": "Quản lý hoa hồng và phân chia"
+    },
+    "/auditLogs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Nhật ký kiểm toán"
+    },
+    "/notifications/{notifId}": {
+      "schema": "Notification",
+      "description": "Thông báo hệ thống"
+    },
+    "/settings/{settingId}": {
+      "schema": "SystemSettings",
+      "description": "Cấu hình thương hiệu và cài đặt hệ thống"
     }
   }
 }

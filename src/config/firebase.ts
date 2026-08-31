@@ -21,6 +21,12 @@ export const isFirebaseConfigured = Boolean(
   firebaseConfig.projectId !== 'bds-pro'
 );
 
+export const isStorageConfigured = Boolean(
+  isFirebaseConfigured &&
+  firebaseConfig.storageBucket &&
+  !firebaseConfig.storageBucket.includes('placeholder')
+);
+
 // Initialize Firebase App
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
@@ -32,6 +38,7 @@ export const db = databaseId && databaseId !== '(default)'
 
 export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
+export { firebaseConfig };
 
 export async function testFirebaseConnection(): Promise<boolean> {
   if (!isFirebaseConfigured) return false;

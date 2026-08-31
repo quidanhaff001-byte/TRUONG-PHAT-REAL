@@ -28,6 +28,8 @@ export function formatVND(amount?: number | null): string {
   return `${amount.toLocaleString('vi-VN')} VNĐ`;
 }
 
+export const formatCurrency = formatVND;
+
 /**
  * Format exact Vietnamese currency with thousands separator
  */

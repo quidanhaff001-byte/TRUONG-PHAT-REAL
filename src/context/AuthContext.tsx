@@ -8,6 +8,7 @@ import {
   signOut,
   sendPasswordResetEmail,
   onAuthStateChanged,
+  signInAnonymously,
 } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { useToast } from './ToastContext';

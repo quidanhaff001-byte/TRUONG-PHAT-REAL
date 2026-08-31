@@ -4,20 +4,50 @@ import {
   User,
   Team,
   PropertyFilterState,
-  TransactionType,
   PropertyStatus,
   Customer,
   CustomerInteraction,
   Appointment,
+  PropertyMatch,
+  Transaction,
+  RentalDeal,
+  RentalContract,
+  RentalPayment,
+  Commission,
+  CommissionSplit,
   AuditLog,
+  Notification,
   SystemSettings,
 } from '../types';
-import { SAMPLE_PROPERTIES, SAMPLE_USERS, SAMPLE_TEAMS, SAMPLE_CUSTOMERS, SAMPLE_APPOINTMENTS, DEFAULT_SYSTEM_SETTINGS } from '../data/sampleData';
+import {
+  SAMPLE_PROPERTIES,
+  SAMPLE_USERS,
+  SAMPLE_TEAMS,
+  SAMPLE_CUSTOMERS,
+  SAMPLE_APPOINTMENTS,
+  SAMPLE_MATCHES,
+  SAMPLE_TRANSACTIONS,
+  SAMPLE_RENTAL_DEALS,
+  SAMPLE_RENTAL_CONTRACTS,
+  SAMPLE_RENTAL_PAYMENTS,
+  SAMPLE_COMMISSIONS,
+  SAMPLE_AUDIT_LOGS,
+  SAMPLE_NOTIFICATIONS,
+  DEFAULT_SYSTEM_SETTINGS,
+} from '../data/sampleData';
 import { useAuth } from './AuthContext';
 import { useToast } from './ToastContext';
 import { generatePropertyCode } from '../utils/formatters';
 import { isFirebaseConfigured, db } from '../config/firebase';
-import { collection, onSnapshot, doc, setDoc, updateDoc, deleteDoc, getDocs, getDoc } from 'firebase/firestore';
+import {
+  collection,
+  onSnapshot,
+  doc,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  getDocs,
+} from 'firebase/firestore';
 
 export interface DuplicateCheckResult {
   isDuplicate: boolean;
@@ -37,31 +67,40 @@ interface DataContextType {
   teams: Team[];
   customers: Customer[];
   appointments: Appointment[];
+  matches: PropertyMatch[];
+  transactions: Transaction[];
+  rentalDeals: RentalDeal[];
+  rentalContracts: RentalContract[];
+  rentalPayments: RentalPayment[];
+  commissions: Commission[];
+  auditLogs: AuditLog[];
+  notifications: Notification[];
   systemSettings: SystemSettings;
   isLoading: boolean;
   filterState: PropertyFilterState;
   setFilterState: React.Dispatch<React.SetStateAction<PropertyFilterState>>;
   resetFilters: () => void;
   filteredProperties: Property[];
-  
+
   // Property Actions
   addProperty: (data: Omit<Property, 'id' | 'code' | 'createdAt' | 'updatedAt' | 'createdBy'>) => Promise<Property>;
   updateProperty: (id: string, data: Partial<Property>) => Promise<void>;
   deleteProperty: (id: string, reason?: string) => Promise<void>;
   restoreProperty: (id: string) => Promise<void>;
+  permanentDeleteProperty: (id: string) => Promise<void>;
   updatePropertyStatus: (id: string, status: PropertyStatus) => Promise<void>;
   assignPropertyAgent: (id: string, agentId: string) => Promise<void>;
   bulkUpdateStatus: (ids: string[], status: PropertyStatus) => Promise<void>;
   bulkAssignAgent: (ids: string[], agentId: string) => Promise<void>;
   bulkDeleteProperties: (ids: string[], reason?: string) => Promise<void>;
   checkDuplicateProperty: (data: Partial<Property>, excludeId?: string) => DuplicateCheckResult;
-  
+
   // User Actions
   addUser: (userData: Omit<User, 'id' | 'createdAt'>) => Promise<User>;
   updateUser: (id: string, userData: Partial<User>) => Promise<void>;
   updateUserAvatar: (userId: string, avatarUrl: string | null) => Promise<void>;
   toggleUserStatus: (id: string) => Promise<void>;
-  
+
   // Team Actions
   addTeam: (teamData: Omit<Team, 'id' | 'createdAt' | 'memberIds'>) => Promise<Team>;
   updateTeam: (id: string, teamData: Partial<Team>) => Promise<void>;
@@ -80,17 +119,62 @@ interface DataContextType {
   bulkDeleteCustomers: (customerIds: string[], reason?: string) => Promise<void>;
   checkDuplicateCustomerPhone: (phone: string, excludeId?: string) => DuplicateCustomerCheckResult;
 
+  // Match Actions
+  addMatch: (matchData: Omit<PropertyMatch, 'id' | 'createdAt'>) => Promise<PropertyMatch>;
+  updateMatch: (id: string, data: Partial<PropertyMatch>) => Promise<void>;
+  deleteMatch: (id: string) => Promise<void>;
+  markMatchSent: (id: string, method?: string) => Promise<void>;
+
   // Appointment Actions
   addAppointment: (appointmentData: Omit<Appointment, 'id' | 'createdAt'>) => Promise<Appointment>;
   updateAppointment: (id: string, data: Partial<Appointment>) => Promise<void>;
   deleteAppointment: (id: string) => Promise<void>;
-  
+  rescheduleAppointment: (id: string, newStartDate: string, newStartTime: string, reason?: string) => Promise<void>;
+  completeAppointment: (id: string, resultNotes: string, customerFeedback?: string, nextAction?: string) => Promise<void>;
+
+  // Transaction Actions (Bán & Sang nhượng)
+  addTransaction: (transData: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Transaction>;
+  updateTransaction: (id: string, data: Partial<Transaction>) => Promise<void>;
+  updateTransactionStatus: (id: string, status: Transaction['status'], step?: number) => Promise<void>;
+  deleteTransaction: (id: string, reason?: string) => Promise<void>;
+
+  // Rental Deal Actions (Cho thuê)
+  addRentalDeal: (dealData: Omit<RentalDeal, 'id' | 'createdAt' | 'updatedAt'>) => Promise<RentalDeal>;
+  updateRentalDeal: (id: string, data: Partial<RentalDeal>) => Promise<void>;
+  updateRentalDealStatus: (id: string, status: RentalDeal['status'], step?: number) => Promise<void>;
+  deleteRentalDeal: (id: string, reason?: string) => Promise<void>;
+
+  // Rental Contract Actions (Hợp đồng thuê)
+  addRentalContract: (contractData: Omit<RentalContract, 'id' | 'createdAt' | 'updatedAt'>) => Promise<RentalContract>;
+  updateRentalContract: (id: string, data: Partial<RentalContract>) => Promise<void>;
+  renewRentalContract: (id: string, newEndDate: string, newRentAmount?: number, notes?: string) => Promise<void>;
+  terminateRentalContract: (id: string, terminationDate: string, reason?: string) => Promise<void>;
+  deleteRentalContract: (id: string, reason?: string) => Promise<void>;
+
+  // Rental Payment Actions
+  addRentalPayment: (paymentData: Omit<RentalPayment, 'id' | 'createdAt' | 'updatedAt'>) => Promise<RentalPayment>;
+  updateRentalPayment: (id: string, data: Partial<RentalPayment>) => Promise<void>;
+  markPaymentPaid: (id: string, paidAmount: number, paymentMethod: 'TIEN_MAT' | 'CHUYEN_KHOAN' | 'KHAC', receiptUrl?: string) => Promise<void>;
+
+  // Commission Actions
+  addCommission: (commData: Omit<Commission, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Commission>;
+  updateCommission: (id: string, data: Partial<Commission>) => Promise<void>;
+  updateCommissionSplits: (id: string, splits: CommissionSplit[], netCommission: number) => Promise<void>;
+  markCommissionSplitPaid: (commissionId: string, splitId: string, receiptUrl?: string) => Promise<void>;
+  deleteCommission: (id: string, reason?: string) => Promise<void>;
+
+  // Audit Logs & Notifications
+  addAuditLog: (log: Omit<AuditLog, 'id' | 'timestamp'>) => Promise<void>;
+  addNotification: (notif: Omit<Notification, 'id' | 'createdAt'>) => Promise<void>;
+  markNotificationAsRead: (id: string) => Promise<void>;
+  markAllNotificationsAsRead: () => Promise<void>;
+
   // Settings Actions
   updateSystemSettings: (data: Partial<SystemSettings>) => Promise<void>;
   restoreDefaultLogo: () => Promise<void>;
 
   // Reset / Seed
-  seedInitialDataToFirestore: () => Promise<void>;
+  seedInitialDataToFirestore: (forceClean?: boolean) => Promise<void>;
   resetDemoData: () => void;
 }
 
@@ -116,7 +200,7 @@ const defaultFilterState: PropertyFilterState = {
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
 export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { currentUser, isAdmin } = useAuth();
+  const { currentUser } = useAuth();
   const { success, error, info } = useToast();
 
   const [properties, setProperties] = useState<Property[]>(SAMPLE_PROPERTIES);
@@ -124,6 +208,15 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [teams, setTeams] = useState<Team[]>(SAMPLE_TEAMS);
   const [customers, setCustomers] = useState<Customer[]>(SAMPLE_CUSTOMERS);
   const [appointments, setAppointments] = useState<Appointment[]>(SAMPLE_APPOINTMENTS);
+  const [matches, setMatches] = useState<PropertyMatch[]>(SAMPLE_MATCHES);
+  const [transactions, setTransactions] = useState<Transaction[]>(SAMPLE_TRANSACTIONS);
+  const [rentalDeals, setRentalDeals] = useState<RentalDeal[]>(SAMPLE_RENTAL_DEALS);
+  const [rentalContracts, setRentalContracts] = useState<RentalContract[]>(SAMPLE_RENTAL_CONTRACTS);
+  const [rentalPayments, setRentalPayments] = useState<RentalPayment[]>(SAMPLE_RENTAL_PAYMENTS);
+  const [commissions, setCommissions] = useState<Commission[]>(SAMPLE_COMMISSIONS);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(SAMPLE_AUDIT_LOGS);
+  const [notifications, setNotifications] = useState<Notification[]>(SAMPLE_NOTIFICATIONS);
+
   const [systemSettings, setSystemSettings] = useState<SystemSettings>(() => {
     try {
       const saved = localStorage.getItem('tp_system_settings');
@@ -135,48 +228,128 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [filterState, setFilterState] = useState<PropertyFilterState>(defaultFilterState);
+  const [hasAttemptedSeed, setHasAttemptedSeed] = useState<boolean>(false);
+
+  // Helper to log user actions to Audit Logs
+  const addAuditLog = async (log: Omit<AuditLog, 'id' | 'timestamp'>) => {
+    const newId = `log_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+    const newLog: AuditLog = {
+      ...log,
+      id: newId,
+      timestamp: new Date().toISOString(),
+      userId: log.userId || currentUser?.id || 'system',
+      userName: log.userName || currentUser?.fullName || 'Hệ thống',
+      userEmail: log.userEmail || currentUser?.email || 'system@truongphatreal.vn',
+      userRole: log.userRole || currentUser?.role || 'ADMIN',
+      teamId: log.teamId || currentUser?.teamId,
+    };
+
+    setAuditLogs((prev) => [newLog, ...prev.slice(0, 499)]);
+    if (isFirebaseConfigured) {
+      try {
+        await setDoc(doc(db, 'auditLogs', newId), newLog);
+      } catch (err: any) {
+        console.warn('Audit log write error:', err.message);
+      }
+    }
+  };
+
+  // Helper to trigger notifications
+  const addNotification = async (notif: Omit<Notification, 'id' | 'createdAt'>) => {
+    const newId = `notif_${Date.now()}`;
+    const newNotif: Notification = {
+      ...notif,
+      id: newId,
+      createdAt: new Date().toISOString(),
+    };
+    setNotifications((prev) => [newNotif, ...prev]);
+    if (isFirebaseConfigured) {
+      try {
+        await setDoc(doc(db, 'notifications', newId), newNotif);
+      } catch (err) {
+        console.warn('Notification write notice:', err);
+      }
+    }
+  };
+
+  const markNotificationAsRead = async (id: string) => {
+    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
+    if (isFirebaseConfigured) {
+      try {
+        await updateDoc(doc(db, 'notifications', id), { isRead: true });
+      } catch (err) {
+        console.warn('Mark notif read notice:', err);
+      }
+    }
+  };
+
+  const markAllNotificationsAsRead = async () => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+    if (isFirebaseConfigured) {
+      try {
+        const snap = await getDocs(collection(db, 'notifications'));
+        for (const d of snap.docs) {
+          if (!d.data().isRead) {
+            await updateDoc(doc(db, 'notifications', d.id), { isRead: true });
+          }
+        }
+      } catch (err) {
+        console.warn('Mark all notif read notice:', err);
+      }
+    }
+  };
 
   // Helper to seed initial sample data into Firestore
   const seedInitialDataToFirestore = async (forceCleanOld: boolean = false) => {
     if (!isFirebaseConfigured) return;
     try {
       if (forceCleanOld) {
-        // Clean out old stale collections before seeding
-        const collectionsToClear = ['properties', 'users', 'teams', 'customers', 'appointments'];
+        const collectionsToClear = [
+          'properties',
+          'users',
+          'teams',
+          'customers',
+          'appointments',
+          'propertyMatches',
+          'transactions',
+          'rentalDeals',
+          'rentalContracts',
+          'rentalPayments',
+          'commissions',
+          'auditLogs',
+          'notifications',
+        ];
         for (const colName of collectionsToClear) {
-          const snap = await getDocs(collection(db, colName));
-          for (const docItem of snap.docs) {
-            await deleteDoc(doc(db, colName, docItem.id));
+          try {
+            const snap = await getDocs(collection(db, colName));
+            for (const docItem of snap.docs) {
+              await deleteDoc(doc(db, colName, docItem.id));
+            }
+          } catch (clearErr) {
+            console.warn(`Notice while clearing ${colName}:`, clearErr);
           }
         }
       }
 
-      // Seed settings
       await setDoc(doc(db, 'settings', 'general'), DEFAULT_SYSTEM_SETTINGS, { merge: true });
 
-      // Seed users
-      for (const u of SAMPLE_USERS) {
-        await setDoc(doc(db, 'users', u.id), u, { merge: true });
-      }
-      // Seed teams
-      for (const t of SAMPLE_TEAMS) {
-        await setDoc(doc(db, 'teams', t.id), t, { merge: true });
-      }
-      // Seed properties
-      for (const p of SAMPLE_PROPERTIES) {
-        await setDoc(doc(db, 'properties', p.id), p, { merge: true });
-      }
-      // Seed customers
-      for (const c of SAMPLE_CUSTOMERS) {
-        await setDoc(doc(db, 'customers', c.id), c, { merge: true });
-      }
-      // Seed appointments
-      for (const a of SAMPLE_APPOINTMENTS) {
-        await setDoc(doc(db, 'appointments', a.id), a, { merge: true });
-      }
-      success('Đã đồng bộ cơ sở dữ liệu lên Cloud Firestore');
-    } catch (err) {
-      console.error('Seeding error:', err);
+      for (const u of SAMPLE_USERS) await setDoc(doc(db, 'users', u.id), u, { merge: true });
+      for (const t of SAMPLE_TEAMS) await setDoc(doc(db, 'teams', t.id), t, { merge: true });
+      for (const p of SAMPLE_PROPERTIES) await setDoc(doc(db, 'properties', p.id), p, { merge: true });
+      for (const c of SAMPLE_CUSTOMERS) await setDoc(doc(db, 'customers', c.id), c, { merge: true });
+      for (const a of SAMPLE_APPOINTMENTS) await setDoc(doc(db, 'appointments', a.id), a, { merge: true });
+      for (const m of SAMPLE_MATCHES) await setDoc(doc(db, 'propertyMatches', m.id), m, { merge: true });
+      for (const tr of SAMPLE_TRANSACTIONS) await setDoc(doc(db, 'transactions', tr.id), tr, { merge: true });
+      for (const rd of SAMPLE_RENTAL_DEALS) await setDoc(doc(db, 'rentalDeals', rd.id), rd, { merge: true });
+      for (const rc of SAMPLE_RENTAL_CONTRACTS) await setDoc(doc(db, 'rentalContracts', rc.id), rc, { merge: true });
+      for (const rp of SAMPLE_RENTAL_PAYMENTS) await setDoc(doc(db, 'rentalPayments', rp.id), rp, { merge: true });
+      for (const cm of SAMPLE_COMMISSIONS) await setDoc(doc(db, 'commissions', cm.id), cm, { merge: true });
+      for (const lg of SAMPLE_AUDIT_LOGS) await setDoc(doc(db, 'auditLogs', lg.id), lg, { merge: true });
+      for (const nf of SAMPLE_NOTIFICATIONS) await setDoc(doc(db, 'notifications', nf.id), nf, { merge: true });
+
+      success('Đã đồng bộ toàn bộ cơ sở dữ liệu lên Cloud Firestore');
+    } catch (err: any) {
+      console.warn('Notice during Firestore data synchronization:', err?.message || err);
     }
   };
 
@@ -189,7 +362,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     setIsLoading(true);
 
-    // 0. System Settings listener
     const unsubSettings = onSnapshot(
       doc(db, 'settings', 'general'),
       (snapshot) => {
@@ -198,88 +370,154 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           setSystemSettings(loaded);
           localStorage.setItem('tp_system_settings', JSON.stringify(loaded));
         } else {
-          // Initialize settings doc if doesn't exist
-          setDoc(doc(db, 'settings', 'general'), DEFAULT_SYSTEM_SETTINGS, { merge: true }).catch(console.error);
+          setDoc(doc(db, 'settings', 'general'), DEFAULT_SYSTEM_SETTINGS, { merge: true }).catch((e) =>
+            console.warn('Notice setting default general config:', e.message)
+          );
         }
       },
-      (err) => {
-        console.warn('Firestore settings snapshot notice:', err.message);
-      }
+      (err) => console.warn('Snapshot listener notice on settings:', err?.message || err)
     );
 
-    // 1. Properties realtime listener
     const unsubProps = onSnapshot(
       collection(db, 'properties'),
       (snapshot) => {
         if (!snapshot.empty) {
           const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Property));
           setProperties(loaded);
-        } else {
-          // If collection is empty on first boot, auto seed default properties
+        } else if (!hasAttemptedSeed) {
+          setHasAttemptedSeed(true);
           seedInitialDataToFirestore();
         }
         setIsLoading(false);
       },
       (err) => {
-        console.warn('Firestore properties snapshot notice:', err.message);
+        console.warn('Snapshot listener notice on properties:', err?.message || err);
         setIsLoading(false);
       }
     );
 
-    // 2. Users realtime listener
     const unsubUsers = onSnapshot(
       collection(db, 'users'),
       (snapshot) => {
         if (!snapshot.empty) {
-          const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as User));
-          setUsers(loaded);
+          setUsers(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as User)));
         }
       },
-      (err) => {
-        console.warn('Firestore users snapshot notice:', err.message);
-      }
+      (err) => console.warn('Snapshot listener notice on users:', err?.message || err)
     );
 
-    // 3. Teams realtime listener
     const unsubTeams = onSnapshot(
       collection(db, 'teams'),
       (snapshot) => {
         if (!snapshot.empty) {
-          const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Team));
-          setTeams(loaded);
+          setTeams(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Team)));
         }
       },
-      (err) => {
-        console.warn('Firestore teams snapshot notice:', err.message);
-      }
+      (err) => console.warn('Snapshot listener notice on teams:', err?.message || err)
     );
 
-    // 4. Customers realtime listener
     const unsubCustomers = onSnapshot(
       collection(db, 'customers'),
       (snapshot) => {
         if (!snapshot.empty) {
-          const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Customer));
-          setCustomers(loaded);
+          setCustomers(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Customer)));
         }
       },
-      (err) => {
-        console.warn('Firestore customers snapshot notice:', err.message);
-      }
+      (err) => console.warn('Snapshot listener notice on customers:', err?.message || err)
     );
 
-    // 5. Appointments listener
     const unsubAppointments = onSnapshot(
       collection(db, 'appointments'),
       (snapshot) => {
         if (!snapshot.empty) {
-          const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Appointment));
-          setAppointments(loaded);
+          setAppointments(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Appointment)));
         }
       },
-      (err) => {
-        console.warn('Firestore appointments snapshot notice:', err.message);
-      }
+      (err) => console.warn('Snapshot listener notice on appointments:', err?.message || err)
+    );
+
+    const unsubMatches = onSnapshot(
+      collection(db, 'propertyMatches'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          setMatches(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as PropertyMatch)));
+        }
+      },
+      (err) => console.warn('Snapshot listener notice on propertyMatches:', err?.message || err)
+    );
+
+    const unsubTransactions = onSnapshot(
+      collection(db, 'transactions'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          setTransactions(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Transaction)));
+        }
+      },
+      (err) => console.warn('Snapshot listener notice on transactions:', err?.message || err)
+    );
+
+    const unsubRentalDeals = onSnapshot(
+      collection(db, 'rentalDeals'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          setRentalDeals(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as RentalDeal)));
+        }
+      },
+      (err) => console.warn('Snapshot listener notice on rentalDeals:', err?.message || err)
+    );
+
+    const unsubContracts = onSnapshot(
+      collection(db, 'rentalContracts'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          setRentalContracts(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as RentalContract)));
+        }
+      },
+      (err) => console.warn('Snapshot listener notice on rentalContracts:', err?.message || err)
+    );
+
+    const unsubPayments = onSnapshot(
+      collection(db, 'rentalPayments'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          setRentalPayments(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as RentalPayment)));
+        }
+      },
+      (err) => console.warn('Snapshot listener notice on rentalPayments:', err?.message || err)
+    );
+
+    const unsubCommissions = onSnapshot(
+      collection(db, 'commissions'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          setCommissions(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Commission)));
+        }
+      },
+      (err) => console.warn('Snapshot listener notice on commissions:', err?.message || err)
+    );
+
+    const unsubAuditLogs = onSnapshot(
+      collection(db, 'auditLogs'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as AuditLog));
+          loaded.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+          setAuditLogs(loaded);
+        }
+      },
+      (err) => console.warn('Snapshot listener notice on auditLogs:', err?.message || err)
+    );
+
+    const unsubNotifs = onSnapshot(
+      collection(db, 'notifications'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Notification));
+          loaded.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          setNotifications(loaded);
+        }
+      },
+      (err) => console.warn('Snapshot listener notice on notifications:', err?.message || err)
     );
 
     return () => {
@@ -289,6 +527,14 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       unsubTeams();
       unsubCustomers();
       unsubAppointments();
+      unsubMatches();
+      unsubTransactions();
+      unsubRentalDeals();
+      unsubContracts();
+      unsubPayments();
+      unsubCommissions();
+      unsubAuditLogs();
+      unsubNotifs();
     };
   }, []);
 
@@ -302,6 +548,14 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setTeams(SAMPLE_TEAMS);
     setCustomers(SAMPLE_CUSTOMERS);
     setAppointments(SAMPLE_APPOINTMENTS);
+    setMatches(SAMPLE_MATCHES);
+    setTransactions(SAMPLE_TRANSACTIONS);
+    setRentalDeals(SAMPLE_RENTAL_DEALS);
+    setRentalContracts(SAMPLE_RENTAL_CONTRACTS);
+    setRentalPayments(SAMPLE_RENTAL_PAYMENTS);
+    setCommissions(SAMPLE_COMMISSIONS);
+    setAuditLogs(SAMPLE_AUDIT_LOGS);
+    setNotifications(SAMPLE_NOTIFICATIONS);
     setSystemSettings(DEFAULT_SYSTEM_SETTINGS);
     localStorage.setItem('tp_system_settings', JSON.stringify(DEFAULT_SYSTEM_SETTINGS));
     seedInitialDataToFirestore(true);
@@ -318,7 +572,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     for (const prop of activeList) {
       let isMatch = false;
 
-      // Phone match
       if (data.ownerPhone && prop.ownerPhone) {
         const p1 = data.ownerPhone.replace(/\D/g, '');
         const p2 = prop.ownerPhone.replace(/\D/g, '');
@@ -328,7 +581,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
       }
 
-      // Cadastral lot & sheet match
       if (
         data.cadastralLotNumber &&
         data.cadastralSheetNumber &&
@@ -341,7 +593,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isMatch = true;
       }
 
-      // Address similarity
       if (data.address && prop.address) {
         const a1 = data.address.toLowerCase().trim();
         const a2 = prop.address.toLowerCase().trim();
@@ -378,11 +629,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const p2 = cust.secondaryPhone ? cust.secondaryPhone.replace(/\D/g, '') : '';
       const pZalo = cust.zalo ? cust.zalo.replace(/\D/g, '') : '';
 
-      if (
-        (p1 && p1 === cleanInput) ||
-        (p2 && p2 === cleanInput) ||
-        (pZalo && pZalo === cleanInput)
-      ) {
+      if ((p1 && p1 === cleanInput) || (p2 && p2 === cleanInput) || (pZalo && pZalo === cleanInput)) {
         return {
           isDuplicate: true,
           matchedCustomer: cust,
@@ -394,11 +641,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return { isDuplicate: false };
   };
 
-  // Add Property (Saves directly to Firestore)
-  const addProperty = async (data: Omit<Property, 'id' | 'code' | 'createdAt' | 'updatedAt' | 'createdBy'>): Promise<Property> => {
+  // Property Actions
+  const addProperty = async (data: Partial<Property> & Omit<Property, 'createdAt' | 'updatedAt' | 'createdBy'>): Promise<Property> => {
     const sequence = properties.length + 1;
-    const newCode = generatePropertyCode(data.transactionType, sequence);
-    const newId = `prop_${Date.now()}`;
+    const newCode = (data as any).code || generatePropertyCode(data.transactionType, sequence);
+    const newId = (data as any).id || `prop_${Date.now()}`;
     const now = new Date().toISOString();
 
     const assignedAgent = users.find((u) => u.id === data.assignedAgentId);
@@ -428,59 +675,80 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     setProperties((prev) => [newProp, ...prev]);
+
+    await addAuditLog({
+      action: 'CREATE',
+      module: 'PROPERTIES',
+      recordId: newId,
+      recordCode: newCode,
+      recordName: newProp.title,
+      description: `Tạo nguồn hàng BĐS mới: [${newCode}] ${newProp.title}`,
+      newData: newProp,
+      level: 'INFO',
+    });
+
     success('Thêm nguồn hàng thành công', `Đã lưu bất động sản mã ${newCode} lên hệ thống.`);
     return newProp;
   };
 
-  // Update Property (Saves directly to Firestore)
   const updateProperty = async (id: string, data: Partial<Property>): Promise<void> => {
     const now = new Date().toISOString();
-    let updatedObj: Property | null = null;
+    const oldProp = properties.find((p) => p.id === id);
 
     setProperties((prev) =>
       prev.map((p) => {
         if (p.id === id) {
-          const assignedAgent = data.assignedAgentId ? users.find((u) => u.id === data.assignedAgentId) : undefined;
-          const team = data.teamId ? teams.find((t) => t.id === data.teamId) : undefined;
-
-          updatedObj = {
+          return {
             ...p,
             ...data,
-            assignedAgentName: assignedAgent ? assignedAgent.fullName : p.assignedAgentName,
-            teamName: team ? team.name : p.teamName,
             updatedAt: now,
             updatedBy: currentUser?.id,
           };
-          return updatedObj;
         }
         return p;
       })
     );
 
-    if (isFirebaseConfigured && updatedObj) {
+    if (isFirebaseConfigured) {
       try {
-        await updateDoc(doc(db, 'properties', id), updatedObj as any);
+        await updateDoc(doc(db, 'properties', id), {
+          ...data,
+          updatedAt: now,
+          updatedBy: currentUser?.id,
+        });
       } catch (err) {
-        console.error('Update Firestore error:', err);
+        console.error('Update property error:', err);
       }
+    }
+
+    if (oldProp) {
+      await addAuditLog({
+        action: 'UPDATE',
+        module: 'PROPERTIES',
+        recordId: id,
+        recordCode: oldProp.code,
+        recordName: oldProp.title,
+        description: `Cập nhật thông tin bất động sản ${oldProp.code}`,
+        oldData: oldProp,
+        newData: data,
+        level: 'INFO',
+      });
     }
 
     success('Cập nhật thành công', 'Thông tin bất động sản đã được lưu.');
   };
 
-  // Delete Property (Soft delete synced to Firestore)
   const deleteProperty = async (id: string, reason?: string): Promise<void> => {
     const now = new Date().toISOString();
+    const prop = properties.find((p) => p.id === id);
     const updateData = {
       isDeleted: true,
       deletedAt: now,
-      deletedBy: currentUser?.id,
+      deletedBy: currentUser?.id || 'anonymous',
       deleteReason: reason || 'Người dùng xóa vào thùng rác',
     };
 
-    setProperties((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, ...updateData } : p))
-    );
+    setProperties((prev) => prev.map((p) => (p.id === id ? { ...p, ...updateData } : p)));
 
     if (isFirebaseConfigured) {
       try {
@@ -490,10 +758,21 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     }
 
+    if (prop) {
+      await addAuditLog({
+        action: 'DELETE',
+        module: 'PROPERTIES',
+        recordId: id,
+        recordCode: prop.code,
+        recordName: prop.title,
+        description: `Chuyển bất động sản ${prop.code} vào thùng rác (${reason || 'Không rõ lý do'})`,
+        level: 'WARNING',
+      });
+    }
+
     info('Đã chuyển vào thùng rác', 'Bất động sản đã được đưa vào thùng rác.');
   };
 
-  // Restore Property
   const restoreProperty = async (id: string): Promise<void> => {
     const updateData = {
       isDeleted: false,
@@ -502,9 +781,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       deleteReason: undefined,
     };
 
-    setProperties((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, ...updateData } : p))
-    );
+    setProperties((prev) => prev.map((p) => (p.id === id ? { ...p, ...updateData } : p)));
 
     if (isFirebaseConfigured) {
       try {
@@ -517,12 +794,22 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     success('Khôi phục thành công', 'Bất động sản đã được đưa trở lại danh sách hoạt động.');
   };
 
-  // Update Status
+  const permanentDeleteProperty = async (id: string): Promise<void> => {
+    setProperties((prev) => prev.filter((p) => p.id !== id));
+    if (isFirebaseConfigured) {
+      try {
+        await deleteDoc(doc(db, 'properties', id));
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    info('Đã xóa vĩnh viễn', 'Bất động sản đã được xóa hoàn toàn khỏi cơ sở dữ liệu.');
+  };
+
   const updatePropertyStatus = async (id: string, status: PropertyStatus): Promise<void> => {
     await updateProperty(id, { status });
   };
 
-  // Bulk Update Status
   const bulkUpdateStatus = async (ids: string[], status: PropertyStatus): Promise<void> => {
     if (ids.length === 0) return;
     const now = new Date().toISOString();
@@ -543,81 +830,84 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     success(`Đã chuyển trạng thái ${ids.length} BĐS`, `Tất cả đã chuyển sang "${status}"`);
   };
 
-  // Assign Agent
   const assignPropertyAgent = async (id: string, agentId: string): Promise<void> => {
     const agent = users.find((u) => u.id === agentId);
     if (!agent) return;
     await updateProperty(id, {
       assignedAgentId: agent.id,
       assignedAgentName: agent.fullName,
-      assignedAgentPhone: agent.phone,
       teamId: agent.teamId,
       teamName: agent.teamName,
     });
-    success('Đã phân công môi giới', `Đã giao sản phẩm cho ${agent.fullName}`);
   };
 
-  // Bulk Assign Agent
   const bulkAssignAgent = async (ids: string[], agentId: string): Promise<void> => {
-    if (ids.length === 0) return;
     const agent = users.find((u) => u.id === agentId);
-    if (!agent) return;
+    if (!agent || ids.length === 0) return;
     const now = new Date().toISOString();
-    const updatePayload = {
-      assignedAgentId: agent.id,
-      assignedAgentName: agent.fullName,
-      assignedAgentPhone: agent.phone,
-      teamId: agent.teamId,
-      teamName: agent.teamName,
-      updatedAt: now,
-    };
 
     setProperties((prev) =>
-      prev.map((p) => (ids.includes(p.id) ? { ...p, ...updatePayload } : p))
+      prev.map((p) =>
+        ids.includes(p.id)
+          ? {
+              ...p,
+              assignedAgentId: agent.id,
+              assignedAgentName: agent.fullName,
+              teamId: agent.teamId,
+              teamName: agent.teamName,
+              updatedAt: now,
+            }
+          : p
+      )
     );
 
     if (isFirebaseConfigured) {
       for (const id of ids) {
         try {
-          await updateDoc(doc(db, 'properties', id), updatePayload);
+          await updateDoc(doc(db, 'properties', id), {
+            assignedAgentId: agent.id,
+            assignedAgentName: agent.fullName,
+            teamId: agent.teamId,
+            teamName: agent.teamName,
+            updatedAt: now,
+          });
         } catch (err) {
           console.error(err);
         }
       }
     }
 
-    success(`Đã phân công ${ids.length} BĐS`, `Giao cho nhân sự ${agent.fullName}`);
+    success(`Đã chuyển giao ${ids.length} BĐS`, `Người phụ trách mới: ${agent.fullName}`);
   };
 
-  // Bulk Delete Properties
-  const bulkDeleteProperties = async (ids: string[], reason = 'Xóa hàng loạt'): Promise<void> => {
+  const bulkDeleteProperties = async (ids: string[], reason?: string): Promise<void> => {
     if (ids.length === 0) return;
     const now = new Date().toISOString();
-    const updatePayload = {
+    const updateData = {
       isDeleted: true,
       deletedAt: now,
-      deletedBy: currentUser?.id,
-      deleteReason: reason,
+      deletedBy: currentUser?.id || 'anonymous',
+      deleteReason: reason || 'Xóa hàng loạt vào thùng rác',
     };
 
     setProperties((prev) =>
-      prev.map((p) => (ids.includes(p.id) ? { ...p, ...updatePayload } : p))
+      prev.map((p) => (ids.includes(p.id) ? { ...p, ...updateData } : p))
     );
 
     if (isFirebaseConfigured) {
       for (const id of ids) {
         try {
-          await updateDoc(doc(db, 'properties', id), updatePayload);
+          await updateDoc(doc(db, 'properties', id), updateData);
         } catch (err) {
           console.error(err);
         }
       }
     }
 
-    info(`Đã chuyển ${ids.length} BĐS vào thùng rác`, 'Bạn có thể khôi phục bất cứ lúc nào.');
+    info(`Đã chuyển ${ids.length} BĐS vào thùng rác`);
   };
 
-  // User management (Firestore synced)
+  // User Actions
   const addUser = async (userData: Omit<User, 'id' | 'createdAt'>): Promise<User> => {
     const newId = `user_${Date.now()}`;
     const now = new Date().toISOString();
@@ -630,6 +920,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       dealsCount: 0,
     };
 
+    setUsers((prev) => [...prev, newUser]);
     if (isFirebaseConfigured) {
       try {
         await setDoc(doc(db, 'users', newId), newUser);
@@ -638,8 +929,16 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     }
 
-    setUsers((prev) => [newUser, ...prev]);
-    success('Tạo tài khoản thành công', `Đã thêm nhân viên ${newUser.fullName} (${newUser.employeeCode})`);
+    await addAuditLog({
+      action: 'CREATE',
+      module: 'USERS',
+      recordId: newId,
+      recordName: newUser.fullName,
+      description: `Tạo tài khoản nhân sự mới: ${newUser.fullName} (${newUser.role})`,
+      level: 'INFO',
+    });
+
+    success('Thêm nhân sự thành công', `Đã tạo hồ sơ cho ${newUser.fullName}`);
     return newUser;
   };
 
@@ -656,19 +955,890 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const updateUserAvatar = async (userId: string, avatarUrl: string | null): Promise<void> => {
-    const updatedPayload = { avatarUrl: avatarUrl ? avatarUrl : '' };
-    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, ...updatedPayload } : u)));
-    if (isFirebaseConfigured) {
-      try {
-        await updateDoc(doc(db, 'users', userId), updatedPayload);
-      } catch (err) {
-        console.error('Error updating user avatar in firestore:', err);
-      }
-    }
-    success(avatarUrl ? 'Cập nhật ảnh đại diện thành công' : 'Đã xóa ảnh đại diện, sử dụng chữ cái đầu');
+    await updateUser(userId, { avatarUrl: avatarUrl || undefined });
   };
 
-  // System Settings management (Firestore synced)
+  const toggleUserStatus = async (id: string): Promise<void> => {
+    const user = users.find((u) => u.id === id);
+    if (!user) return;
+    const newStatus = user.status === 'ACTIVE' ? 'LOCKED' : 'ACTIVE';
+    await updateUser(id, { status: newStatus });
+    await addAuditLog({
+      action: 'LOCK_USER',
+      module: 'USERS',
+      recordId: id,
+      recordName: user.fullName,
+      description: `Đổi trạng thái tài khoản ${user.fullName} sang [${newStatus}]`,
+      level: 'WARNING',
+    });
+    info('Đã đổi trạng thái tài khoản', `Tài khoản ${user.fullName} hiện ở trạng thái ${newStatus === 'ACTIVE' ? 'Hoạt động' : 'Tạm khóa'}`);
+  };
+
+  // Team Actions
+  const addTeam = async (teamData: Omit<Team, 'id' | 'createdAt' | 'memberIds'>): Promise<Team> => {
+    const newId = `team_${Date.now()}`;
+    const newTeam: Team = {
+      ...teamData,
+      id: newId,
+      memberIds: teamData.leaderId ? [teamData.leaderId] : [],
+      createdAt: new Date().toISOString(),
+    };
+
+    setTeams((prev) => [...prev, newTeam]);
+    if (isFirebaseConfigured) {
+      try {
+        await setDoc(doc(db, 'teams', newId), newTeam);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    success('Tạo đội nhóm thành công', `Đã tạo nhóm ${newTeam.name}`);
+    return newTeam;
+  };
+
+  const updateTeam = async (id: string, teamData: Partial<Team>): Promise<void> => {
+    setTeams((prev) => prev.map((t) => (t.id === id ? { ...t, ...teamData, updatedAt: new Date().toISOString() } : t)));
+    if (isFirebaseConfigured) {
+      try {
+        await updateDoc(doc(db, 'teams', id), { ...teamData, updatedAt: new Date().toISOString() });
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    success('Cập nhật đội nhóm thành công');
+  };
+
+  const deleteTeam = async (id: string): Promise<void> => {
+    setTeams((prev) => prev.filter((t) => t.id !== id));
+    if (isFirebaseConfigured) {
+      try {
+        await deleteDoc(doc(db, 'teams', id));
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    info('Đã xóa đội nhóm');
+  };
+
+  // Customer Actions
+  const addCustomer = async (customerData: Omit<Customer, 'id' | 'code' | 'createdAt' | 'updatedAt'>): Promise<Customer> => {
+    const sequence = customers.length + 1;
+    const newCode = `KH-AG${sequence.toString().padStart(4, '0')}`;
+    const newId = `cust_${Date.now()}`;
+    const now = new Date().toISOString();
+
+    const assignedAgent = users.find((u) => u.id === customerData.assignedAgentId);
+    const team = teams.find((t) => t.id === (customerData.teamId || assignedAgent?.teamId));
+
+    const newCustomer: Customer = {
+      ...customerData,
+      id: newId,
+      code: newCode,
+      assignedAgentName: assignedAgent?.fullName || 'Chưa phân công',
+      teamId: team?.id,
+      teamName: team?.name,
+      createdAt: now,
+      createdBy: currentUser?.id || 'anonymous',
+      createdByName: currentUser?.fullName || 'Người dùng',
+      updatedAt: now,
+      updatedBy: currentUser?.id,
+      isDeleted: false,
+    };
+
+    setCustomers((prev) => [newCustomer, ...prev]);
+    if (isFirebaseConfigured) {
+      try {
+        await setDoc(doc(db, 'customers', newId), newCustomer);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    await addAuditLog({
+      action: 'CREATE',
+      module: 'CUSTOMERS',
+      recordId: newId,
+      recordCode: newCode,
+      recordName: newCustomer.fullName,
+      description: `Tiếp nhận khách hàng mới [${newCode}] ${newCustomer.fullName}`,
+      level: 'INFO',
+    });
+
+    success('Thêm khách hàng thành công', `Đã lưu khách hàng mã ${newCode}`);
+    return newCustomer;
+  };
+
+  const updateCustomer = async (id: string, data: Partial<Customer>): Promise<void> => {
+    const now = new Date().toISOString();
+    setCustomers((prev) => prev.map((c) => (c.id === id ? { ...c, ...data, updatedAt: now, updatedBy: currentUser?.id } : c)));
+    if (isFirebaseConfigured) {
+      try {
+        await updateDoc(doc(db, 'customers', id), { ...data, updatedAt: now, updatedBy: currentUser?.id });
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    success('Cập nhật khách hàng thành công');
+  };
+
+  const deleteCustomer = async (id: string, reason?: string): Promise<void> => {
+    const now = new Date().toISOString();
+    const cust = customers.find((c) => c.id === id);
+    const updateData = {
+      isDeleted: true,
+      deletedAt: now,
+      deletedBy: currentUser?.id || 'anonymous',
+      deleteReason: reason || 'Xóa vào thùng rác',
+    };
+
+    setCustomers((prev) => prev.map((c) => (c.id === id ? { ...c, ...updateData } : c)));
+    if (isFirebaseConfigured) {
+      try {
+        await updateDoc(doc(db, 'customers', id), updateData);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    if (cust) {
+      await addAuditLog({
+        action: 'DELETE',
+        module: 'CUSTOMERS',
+        recordId: id,
+        recordCode: cust.code,
+        recordName: cust.fullName,
+        description: `Chuyển khách hàng ${cust.code} (${cust.fullName}) vào thùng rác`,
+        level: 'WARNING',
+      });
+    }
+
+    info('Đã chuyển khách hàng vào thùng rác');
+  };
+
+  const restoreCustomer = async (id: string): Promise<void> => {
+    const updateData = {
+      isDeleted: false,
+      deletedAt: undefined,
+      deletedBy: undefined,
+      deleteReason: undefined,
+    };
+    setCustomers((prev) => prev.map((c) => (c.id === id ? { ...c, ...updateData } : c)));
+    if (isFirebaseConfigured) {
+      try {
+        await updateDoc(doc(db, 'customers', id), updateData as any);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    success('Khôi phục khách hàng thành công');
+  };
+
+  const permanentDeleteCustomer = async (id: string): Promise<void> => {
+    setCustomers((prev) => prev.filter((c) => c.id !== id));
+    if (isFirebaseConfigured) {
+      try {
+        await deleteDoc(doc(db, 'customers', id));
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    info('Đã xóa vĩnh viễn khách hàng');
+  };
+
+  const addCustomerInteraction = async (customerId: string, interaction: Omit<CustomerInteraction, 'id' | 'createdAt'>): Promise<void> => {
+    const newId = `inter_${Date.now()}`;
+    const now = new Date().toISOString();
+    const newInteraction: CustomerInteraction = {
+      ...interaction,
+      id: newId,
+      createdAt: now,
+    };
+
+    const targetCustomer = customers.find((c) => c.id === customerId);
+    if (!targetCustomer) return;
+
+    const updatedLogs = [newInteraction, ...(targetCustomer.interactionLogs || [])];
+    await updateCustomer(customerId, { interactionLogs: updatedLogs });
+    success('Đã lưu nhật ký chăm sóc khách');
+  };
+
+  const assignCustomerAgent = async (customerId: string, agentId: string, transferNote?: string): Promise<void> => {
+    const agent = users.find((u) => u.id === agentId);
+    if (!agent) return;
+    await updateCustomer(customerId, {
+      assignedAgentId: agent.id,
+      assignedAgentName: agent.fullName,
+      teamId: agent.teamId,
+      teamName: agent.teamName,
+      notes: transferNote ? `${transferNote}\n---\n${customers.find((c) => c.id === customerId)?.notes || ''}` : undefined,
+    });
+  };
+
+  const bulkAssignCustomerAgent = async (customerIds: string[], agentId: string): Promise<void> => {
+    const agent = users.find((u) => u.id === agentId);
+    if (!agent || customerIds.length === 0) return;
+    const now = new Date().toISOString();
+
+    setCustomers((prev) =>
+      prev.map((c) =>
+        customerIds.includes(c.id)
+          ? {
+              ...c,
+              assignedAgentId: agent.id,
+              assignedAgentName: agent.fullName,
+              teamId: agent.teamId,
+              teamName: agent.teamName,
+              updatedAt: now,
+            }
+          : c
+      )
+    );
+
+    if (isFirebaseConfigured) {
+      for (const id of customerIds) {
+        try {
+          await updateDoc(doc(db, 'customers', id), {
+            assignedAgentId: agent.id,
+            assignedAgentName: agent.fullName,
+            teamId: agent.teamId,
+            teamName: agent.teamName,
+            updatedAt: now,
+          });
+        } catch (err) {
+          console.error(err);
+        }
+      }
+    }
+
+    success(`Đã chuyển giao ${customerIds.length} khách hàng`, `Người phụ trách: ${agent.fullName}`);
+  };
+
+  const bulkUpdateCustomerStatus = async (customerIds: string[], status: Customer['status']): Promise<void> => {
+    if (customerIds.length === 0) return;
+    const now = new Date().toISOString();
+    setCustomers((prev) => prev.map((c) => (customerIds.includes(c.id) ? { ...c, status, updatedAt: now } : c)));
+    if (isFirebaseConfigured) {
+      for (const id of customerIds) {
+        try {
+          await updateDoc(doc(db, 'customers', id), { status, updatedAt: now });
+        } catch (err) {
+          console.error(err);
+        }
+      }
+    }
+    success(`Đã cập nhật trạng thái ${customerIds.length} khách hàng`);
+  };
+
+  const bulkDeleteCustomers = async (customerIds: string[], reason?: string): Promise<void> => {
+    if (customerIds.length === 0) return;
+    const now = new Date().toISOString();
+    const updateData = {
+      isDeleted: true,
+      deletedAt: now,
+      deletedBy: currentUser?.id || 'anonymous',
+      deleteReason: reason || 'Xóa hàng loạt vào thùng rác',
+    };
+    setCustomers((prev) => prev.map((c) => (customerIds.includes(c.id) ? { ...c, ...updateData } : c)));
+    if (isFirebaseConfigured) {
+      for (const id of customerIds) {
+        try {
+          await updateDoc(doc(db, 'customers', id), updateData);
+        } catch (err) {
+          console.error(err);
+        }
+      }
+    }
+    info(`Đã chuyển ${customerIds.length} khách hàng vào thùng rác`);
+  };
+
+  // Match Actions (Ghép sản phẩm)
+  const addMatch = async (matchData: Omit<PropertyMatch, 'id' | 'createdAt'>): Promise<PropertyMatch> => {
+    const newId = `match_${Date.now()}`;
+    const newMatch: PropertyMatch = {
+      ...matchData,
+      id: newId,
+      createdAt: new Date().toISOString(),
+    };
+
+    setMatches((prev) => [newMatch, ...prev]);
+    if (isFirebaseConfigured) {
+      try {
+        await setDoc(doc(db, 'propertyMatches', newId), newMatch);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    return newMatch;
+  };
+
+  const updateMatch = async (id: string, data: Partial<PropertyMatch>): Promise<void> => {
+    const now = new Date().toISOString();
+    setMatches((prev) => prev.map((m) => (m.id === id ? { ...m, ...data, updatedAt: now } : m)));
+    if (isFirebaseConfigured) {
+      try {
+        await updateDoc(doc(db, 'propertyMatches', id), { ...data, updatedAt: now });
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    success('Đã cập nhật phản hồi ghép sản phẩm');
+  };
+
+  const deleteMatch = async (id: string): Promise<void> => {
+    setMatches((prev) => prev.filter((m) => m.id !== id));
+    if (isFirebaseConfigured) {
+      try {
+        await deleteDoc(doc(db, 'propertyMatches', id));
+      } catch (err) {
+        console.error(err);
+      }
+    }
+  };
+
+  const markMatchSent = async (id: string, method: string = 'Zalo'): Promise<void> => {
+    const now = new Date().toISOString();
+    await updateMatch(id, {
+      sentAt: now,
+      sentBy: currentUser?.id,
+      sentByName: currentUser?.fullName,
+      responseStatus: 'CHUA_PHAN_HOI',
+    });
+    success(`Đã ghi nhận gửi sản phẩm qua ${method}`);
+  };
+
+  // Appointment Actions (Lịch hẹn)
+  const addAppointment = async (appointmentData: Omit<Appointment, 'id' | 'createdAt'>): Promise<Appointment> => {
+    const sequence = appointments.length + 1;
+    const newCode = `LH-AG${sequence.toString().padStart(4, '0')}`;
+    const newId = `apt_${Date.now()}`;
+    const now = new Date().toISOString();
+
+    const agent = users.find((u) => u.id === appointmentData.assignedAgentId);
+    const newAppointment: Appointment = {
+      ...appointmentData,
+      id: newId,
+      code: newCode,
+      agentName: agent?.fullName || currentUser?.fullName || 'Môi giới',
+      teamId: agent?.teamId,
+      createdAt: now,
+    };
+
+    setAppointments((prev) => [newAppointment, ...prev]);
+    if (isFirebaseConfigured) {
+      try {
+        await setDoc(doc(db, 'appointments', newId), newAppointment);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    await addAuditLog({
+      action: 'CREATE',
+      module: 'APPOINTMENTS',
+      recordId: newId,
+      recordCode: newCode,
+      recordName: newAppointment.title,
+      description: `Lên lịch hẹn mới: [${newAppointment.type}] ${newAppointment.title}`,
+      level: 'INFO',
+    });
+
+    // Notify agent
+    await addNotification({
+      title: 'Lịch hẹn mới được phân công',
+      content: `${newAppointment.title} lúc ${newAppointment.startTime || ''} ${newAppointment.startDate || ''}`,
+      type: 'APPOINTMENT',
+      link: '/appointments',
+      recipientId: newAppointment.assignedAgentId,
+      isRead: false,
+    });
+
+    success('Tạo lịch hẹn thành công', `Đã lên lịch "${newAppointment.title}"`);
+    return newAppointment;
+  };
+
+  const updateAppointment = async (id: string, data: Partial<Appointment>): Promise<void> => {
+    const now = new Date().toISOString();
+    setAppointments((prev) => prev.map((a) => (a.id === id ? { ...a, ...data, updatedAt: now } : a)));
+    if (isFirebaseConfigured) {
+      try {
+        await updateDoc(doc(db, 'appointments', id), { ...data, updatedAt: now });
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    success('Đã cập nhật lịch hẹn');
+  };
+
+  const deleteAppointment = async (id: string): Promise<void> => {
+    setAppointments((prev) => prev.filter((a) => a.id !== id));
+    if (isFirebaseConfigured) {
+      try {
+        await deleteDoc(doc(db, 'appointments', id));
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    info('Đã xóa lịch hẹn');
+  };
+
+  const rescheduleAppointment = async (id: string, newStartDate: string, newStartTime: string, reason?: string): Promise<void> => {
+    const apt = appointments.find((a) => a.id === id);
+    if (!apt) return;
+    await updateAppointment(id, {
+      startDate: newStartDate,
+      startTime: newStartTime,
+      startDateTime: `${newStartDate}T${newStartTime}:00+07:00`,
+      status: 'Dời lịch',
+      notes: reason ? `Dời lịch: ${reason}\n${apt.notes || ''}` : apt.notes,
+    });
+    info('Đã dời lịch hẹn', `Thời gian mới: ${newStartTime} ngày ${newStartDate}`);
+  };
+
+  const completeAppointment = async (id: string, resultNotes: string, customerFeedback?: string, nextAction?: string): Promise<void> => {
+    await updateAppointment(id, {
+      status: 'Đã hoàn thành',
+      resultNotes,
+      customerFeedback,
+      nextAction,
+    });
+    success('Đã hoàn thành buổi hẹn', 'Đã ghi nhận kết quả và phản hồi khách hàng.');
+  };
+
+  // Transaction Actions (Bán & Sang nhượng)
+  const addTransaction = async (transData: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'>): Promise<Transaction> => {
+    const sequence = transactions.length + 1;
+    const newCode = `GD-AG${sequence.toString().padStart(4, '0')}`;
+    const newId = `trans_${Date.now()}`;
+    const now = new Date().toISOString();
+
+    const newTrans: Transaction = {
+      ...transData,
+      id: newId,
+      code: newCode,
+      createdAt: now,
+      updatedAt: now,
+      createdBy: currentUser?.id,
+    };
+
+    setTransactions((prev) => [newTrans, ...prev]);
+    if (isFirebaseConfigured) {
+      try {
+        await setDoc(doc(db, 'transactions', newId), newTrans);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    // Auto-update property status if deposit or sale
+    if (newTrans.status === 'Đã đặt cọc') {
+      await updatePropertyStatus(newTrans.propertyId, 'Đã nhận cọc');
+    } else if (newTrans.status === 'Hoàn tất') {
+      await updatePropertyStatus(newTrans.propertyId, newTrans.type === 'SALE' ? 'Đã bán' : 'Đã sang nhượng');
+    }
+
+    await addAuditLog({
+      action: 'CREATE',
+      module: 'TRANSACTIONS',
+      recordId: newId,
+      recordCode: newCode,
+      recordName: newTrans.propertyTitle,
+      description: `Tạo giao dịch [${newTrans.type === 'SALE' ? 'Bán BĐS' : 'Sang nhượng'}] mã ${newCode} cho căn ${newTrans.propertyCode}`,
+      newData: newTrans,
+      level: 'INFO',
+    });
+
+    success('Tạo giao dịch thành công', `Đã lưu giao dịch ${newCode}`);
+    return newTrans;
+  };
+
+  const updateTransaction = async (id: string, data: Partial<Transaction>): Promise<void> => {
+    const now = new Date().toISOString();
+    const oldTrans = transactions.find((t) => t.id === id);
+
+    setTransactions((prev) => prev.map((t) => (t.id === id ? { ...t, ...data, updatedAt: now } : t)));
+    if (isFirebaseConfigured) {
+      try {
+        await updateDoc(doc(db, 'transactions', id), { ...data, updatedAt: now });
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    if (data.status && oldTrans && data.status !== oldTrans.status) {
+      if (data.status === 'Đã đặt cọc') {
+        await updatePropertyStatus(oldTrans.propertyId, 'Đã nhận cọc');
+      } else if (data.status === 'Hoàn tất') {
+        await updatePropertyStatus(oldTrans.propertyId, oldTrans.type === 'SALE' ? 'Đã bán' : 'Đã sang nhượng');
+      } else if (data.status === 'Hủy cọc' || data.status === 'Giao dịch thất bại') {
+        await updatePropertyStatus(oldTrans.propertyId, 'Đang bán');
+      }
+    }
+
+    success('Đã cập nhật tiến độ giao dịch');
+  };
+
+  const updateTransactionStatus = async (id: string, status: Transaction['status'], step?: number): Promise<void> => {
+    await updateTransaction(id, { status, step });
+  };
+
+  const deleteTransaction = async (id: string, reason?: string): Promise<void> => {
+    setTransactions((prev) => prev.filter((t) => t.id !== id));
+    if (isFirebaseConfigured) {
+      try {
+        await deleteDoc(doc(db, 'transactions', id));
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    info('Đã xóa giao dịch');
+  };
+
+  // Rental Deal Actions (Cho thuê)
+  const addRentalDeal = async (dealData: Omit<RentalDeal, 'id' | 'createdAt' | 'updatedAt'>): Promise<RentalDeal> => {
+    const sequence = rentalDeals.length + 1;
+    const newCode = `THUE-AG${sequence.toString().padStart(4, '0')}`;
+    const newId = `rentdeal_${Date.now()}`;
+    const now = new Date().toISOString();
+
+    const newDeal: RentalDeal = {
+      ...dealData,
+      id: newId,
+      code: newCode,
+      createdAt: now,
+      updatedAt: now,
+      createdBy: currentUser?.id,
+    };
+
+    setRentalDeals((prev) => [newDeal, ...prev]);
+    if (isFirebaseConfigured) {
+      try {
+        await setDoc(doc(db, 'rentalDeals', newId), newDeal);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    if (newDeal.status === 'Đã đặt cọc') {
+      await updatePropertyStatus(newDeal.propertyId, 'Đã nhận cọc');
+    } else if (newDeal.status === 'Đã ký' || newDeal.status === 'Hoàn tất') {
+      await updatePropertyStatus(newDeal.propertyId, 'Đã cho thuê');
+    }
+
+    await addAuditLog({
+      action: 'CREATE',
+      module: 'RENTALS',
+      recordId: newId,
+      recordCode: newCode,
+      recordName: newDeal.propertyTitle,
+      description: `Tạo giao dịch cho thuê [${newCode}] BĐS ${newDeal.propertyCode}`,
+      level: 'INFO',
+    });
+
+    success('Tạo giao dịch thuê thành công', `Đã lưu giao dịch ${newCode}`);
+    return newDeal;
+  };
+
+  const updateRentalDeal = async (id: string, data: Partial<RentalDeal>): Promise<void> => {
+    const now = new Date().toISOString();
+    const oldDeal = rentalDeals.find((d) => d.id === id);
+
+    setRentalDeals((prev) => prev.map((d) => (d.id === id ? { ...d, ...data, updatedAt: now } : d)));
+    if (isFirebaseConfigured) {
+      try {
+        await updateDoc(doc(db, 'rentalDeals', id), { ...data, updatedAt: now });
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    if (data.status && oldDeal && data.status !== oldDeal.status) {
+      if (data.status === 'Đã đặt cọc') {
+        await updatePropertyStatus(oldDeal.propertyId, 'Đã nhận cọc');
+      } else if (data.status === 'Đã ký' || data.status === 'Hoàn tất') {
+        await updatePropertyStatus(oldDeal.propertyId, 'Đã cho thuê');
+      } else if (data.status === 'Hủy') {
+        await updatePropertyStatus(oldDeal.propertyId, 'Đang cho thuê');
+      }
+    }
+
+    success('Đã cập nhật giao dịch thuê');
+  };
+
+  const updateRentalDealStatus = async (id: string, status: RentalDeal['status'], step?: number): Promise<void> => {
+    await updateRentalDeal(id, { status, step });
+  };
+
+  const deleteRentalDeal = async (id: string, reason?: string): Promise<void> => {
+    setRentalDeals((prev) => prev.filter((d) => d.id !== id));
+    if (isFirebaseConfigured) {
+      try {
+        await deleteDoc(doc(db, 'rentalDeals', id));
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    info('Đã xóa giao dịch thuê');
+  };
+
+  // Rental Contract Actions (Hợp đồng thuê)
+  const addRentalContract = async (contractData: Omit<RentalContract, 'id' | 'createdAt' | 'updatedAt'>): Promise<RentalContract> => {
+    const sequence = rentalContracts.length + 1;
+    const newCode = `HDT-AG${sequence.toString().padStart(4, '0')}`;
+    const newId = `contract_${Date.now()}`;
+    const now = new Date().toISOString();
+
+    const newContract: RentalContract = {
+      ...contractData,
+      id: newId,
+      code: newCode,
+      createdAt: now,
+      updatedAt: now,
+      createdBy: currentUser?.id,
+    };
+
+    setRentalContracts((prev) => [newContract, ...prev]);
+    if (isFirebaseConfigured) {
+      try {
+        await setDoc(doc(db, 'rentalContracts', newId), newContract);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    // Auto update property status
+    if (newContract.status === 'Đang hiệu lực') {
+      await updatePropertyStatus(newContract.propertyId, 'Đã cho thuê');
+    }
+
+    await addAuditLog({
+      action: 'CREATE',
+      module: 'CONTRACTS',
+      recordId: newId,
+      recordCode: newCode,
+      recordName: newContract.propertyTitle,
+      description: `Tạo hợp đồng thuê mới [${newCode}] cho khách ${newContract.customerName}`,
+      level: 'INFO',
+    });
+
+    success('Tạo hợp đồng thuê thành công', `Hợp đồng mã ${newCode} đã được lưu.`);
+    return newContract;
+  };
+
+  const updateRentalContract = async (id: string, data: Partial<RentalContract>): Promise<void> => {
+    const now = new Date().toISOString();
+    setRentalContracts((prev) => prev.map((c) => (c.id === id ? { ...c, ...data, updatedAt: now } : c)));
+    if (isFirebaseConfigured) {
+      try {
+        await updateDoc(doc(db, 'rentalContracts', id), { ...data, updatedAt: now });
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    success('Đã cập nhật hợp đồng thuê');
+  };
+
+  const renewRentalContract = async (id: string, newEndDate: string, newRentAmount?: number, notes?: string): Promise<void> => {
+    const contract = rentalContracts.find((c) => c.id === id);
+    if (!contract) return;
+    await updateRentalContract(id, {
+      endDate: newEndDate,
+      monthlyRent: newRentAmount || contract.monthlyRent,
+      status: 'Đã gia hạn',
+      notes: notes ? `Gia hạn đến ${newEndDate}: ${notes}\n${contract.notes || ''}` : contract.notes,
+    });
+    await addAuditLog({
+      action: 'UPDATE',
+      module: 'CONTRACTS',
+      recordId: id,
+      recordCode: contract.code,
+      description: `Gia hạn hợp đồng ${contract.code} đến ngày ${newEndDate}`,
+      level: 'INFO',
+    });
+    success('Gia hạn hợp đồng thành công');
+  };
+
+  const terminateRentalContract = async (id: string, terminationDate: string, reason?: string): Promise<void> => {
+    const contract = rentalContracts.find((c) => c.id === id);
+    if (!contract) return;
+    await updateRentalContract(id, {
+      status: 'Đã thanh lý',
+      notes: `Thanh lý ngày ${terminationDate}: ${reason || 'Kết thúc thời hạn thuê'}\n${contract.notes || ''}`,
+    });
+    // Return property to available status
+    await updatePropertyStatus(contract.propertyId, 'Đang cho thuê');
+    await addAuditLog({
+      action: 'UPDATE',
+      module: 'CONTRACTS',
+      recordId: id,
+      recordCode: contract.code,
+      description: `Thanh lý hợp đồng thuê ${contract.code}`,
+      level: 'WARNING',
+    });
+    info('Đã thanh lý hợp đồng thuê');
+  };
+
+  const deleteRentalContract = async (id: string, reason?: string): Promise<void> => {
+    setRentalContracts((prev) => prev.filter((c) => c.id !== id));
+    if (isFirebaseConfigured) {
+      try {
+        await deleteDoc(doc(db, 'rentalContracts', id));
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    info('Đã xóa hợp đồng');
+  };
+
+  // Rental Payment Actions
+  const addRentalPayment = async (paymentData: Omit<RentalPayment, 'id' | 'createdAt' | 'updatedAt'>): Promise<RentalPayment> => {
+    const newId = `pay_${Date.now()}`;
+    const now = new Date().toISOString();
+    const newPayment: RentalPayment = {
+      ...paymentData,
+      id: newId,
+      createdAt: now,
+      updatedAt: now,
+    };
+    setRentalPayments((prev) => [...prev, newPayment]);
+    if (isFirebaseConfigured) {
+      try {
+        await setDoc(doc(db, 'rentalPayments', newId), newPayment);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    return newPayment;
+  };
+
+  const updateRentalPayment = async (id: string, data: Partial<RentalPayment>): Promise<void> => {
+    const now = new Date().toISOString();
+    setRentalPayments((prev) => prev.map((p) => (p.id === id ? { ...p, ...data, updatedAt: now } : p)));
+    if (isFirebaseConfigured) {
+      try {
+        await updateDoc(doc(db, 'rentalPayments', id), { ...data, updatedAt: now });
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    success('Đã cập nhật kỳ thanh toán');
+  };
+
+  const markPaymentPaid = async (
+    id: string,
+    paidAmount: number,
+    paymentMethod: 'TIEN_MAT' | 'CHUYEN_KHOAN' | 'KHAC',
+    receiptUrl?: string
+  ): Promise<void> => {
+    const payment = rentalPayments.find((p) => p.id === id);
+    if (!payment) return;
+    const now = new Date().toISOString();
+    const remaining = Math.max(0, payment.totalAmount - paidAmount);
+    const status = remaining === 0 ? 'Đã thanh toán' : 'Thanh toán một phần';
+
+    await updateRentalPayment(id, {
+      paidAmount,
+      remainingAmount: remaining,
+      paymentMethod,
+      paidDate: now.split('T')[0],
+      status,
+      receiptUrl,
+    });
+    success('Đã xác nhận thu tiền thuê thành công');
+  };
+
+  // Commission Actions (Hoa hồng)
+  const addCommission = async (commData: Omit<Commission, 'id' | 'createdAt' | 'updatedAt'>): Promise<Commission> => {
+    const sequence = commissions.length + 1;
+    const newCode = `HH-AG${sequence.toString().padStart(4, '0')}`;
+    const newId = `comm_${Date.now()}`;
+    const now = new Date().toISOString();
+
+    const newComm: Commission = {
+      ...commData,
+      id: newId,
+      code: newCode,
+      createdAt: now,
+      updatedAt: now,
+      createdBy: currentUser?.id,
+    };
+
+    setCommissions((prev) => [newComm, ...prev]);
+    if (isFirebaseConfigured) {
+      try {
+        await setDoc(doc(db, 'commissions', newId), newComm);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    await addAuditLog({
+      action: 'CREATE',
+      module: 'COMMISSIONS',
+      recordId: newId,
+      recordCode: newCode,
+      description: `Tạo bảng tính hoa hồng [${newCode}] cho giao dịch ${newComm.dealCode} (Tổng: ${newComm.totalExpectedCommission.toLocaleString('vi-VN')} đ)`,
+      level: 'INFO',
+    });
+
+    success('Tạo hoa hồng thành công', `Đã lưu hồ sơ hoa hồng ${newCode}`);
+    return newComm;
+  };
+
+  const updateCommission = async (id: string, data: Partial<Commission>): Promise<void> => {
+    const now = new Date().toISOString();
+    setCommissions((prev) => prev.map((c) => (c.id === id ? { ...c, ...data, updatedAt: now } : c)));
+    if (isFirebaseConfigured) {
+      try {
+        await updateDoc(doc(db, 'commissions', id), { ...data, updatedAt: now });
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    success('Đã cập nhật thông tin hoa hồng');
+  };
+
+  const updateCommissionSplits = async (id: string, splits: CommissionSplit[], netCommission: number): Promise<void> => {
+    await updateCommission(id, { splits, netCommission });
+    await addAuditLog({
+      action: 'SPLIT_COMMISSION',
+      module: 'COMMISSIONS',
+      recordId: id,
+      description: `Cập nhật phân chia tỷ lệ hoa hồng cho hồ sơ ${id}`,
+      level: 'INFO',
+    });
+    success('Đã lưu phân chia hoa hồng');
+  };
+
+  const markCommissionSplitPaid = async (commissionId: string, splitId: string, receiptUrl?: string): Promise<void> => {
+    const comm = commissions.find((c) => c.id === commissionId);
+    if (!comm) return;
+    const now = new Date().toISOString();
+
+    const updatedSplits = comm.splits.map((s) =>
+      s.id === splitId ? { ...s, isPaid: true, paidDate: now.split('T')[0], receiptUrl } : s
+    );
+
+    const allPaid = updatedSplits.every((s) => s.isPaid);
+    const somePaid = updatedSplits.some((s) => s.isPaid);
+    const newStatus = allPaid ? 'Đã chia đủ' : somePaid ? 'Đã chia một phần' : comm.status;
+
+    await updateCommission(commissionId, { splits: updatedSplits, status: newStatus });
+    success('Đã xác nhận chi trả hoa hồng thành công');
+  };
+
+  const deleteCommission = async (id: string, reason?: string): Promise<void> => {
+    setCommissions((prev) => prev.filter((c) => c.id !== id));
+    if (isFirebaseConfigured) {
+      try {
+        await deleteDoc(doc(db, 'commissions', id));
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    info('Đã xóa hồ sơ hoa hồng');
+  };
+
+  // Settings Actions
   const updateSystemSettings = async (data: Partial<SystemSettings>): Promise<void> => {
     const updated = {
       ...systemSettings,
@@ -682,438 +1852,41 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (isFirebaseConfigured) {
       try {
         await setDoc(doc(db, 'settings', 'general'), updated, { merge: true });
-      } catch (err) {
-        console.error('Error updating system settings in firestore:', err);
+      } catch (err: any) {
+        console.warn('Update settings error:', err.message);
       }
     }
-    success('Cập nhật thông tin hệ thống thành công');
+
+    await addAuditLog({
+      action: 'SETTINGS_CHANGE',
+      module: 'SETTINGS',
+      description: 'Thay đổi cài đặt hệ thống và nhận diện thương hiệu công ty',
+      level: 'INFO',
+    });
+
+    success('Cập nhật cài đặt thành công', 'Thông tin hệ thống đã được đồng bộ.');
   };
 
   const restoreDefaultLogo = async (): Promise<void> => {
-    const updated = {
-      ...systemSettings,
-      logoUrl: '',
-      updatedAt: new Date().toISOString(),
-      updatedBy: currentUser?.fullName || 'Quản trị viên',
-    };
-    setSystemSettings(updated);
-    localStorage.setItem('tp_system_settings', JSON.stringify(updated));
-
-    if (isFirebaseConfigured) {
-      try {
-        await updateDoc(doc(db, 'settings', 'general'), { logoUrl: '' });
-      } catch (err) {
-        console.error('Error restoring default logo in firestore:', err);
-      }
-    }
-    info('Đã khôi phục logo mặc định TP màu vàng');
+    await updateSystemSettings({ logoUrl: '' });
   };
 
-  const toggleUserStatus = async (id: string): Promise<void> => {
-    const user = users.find((u) => u.id === id);
-    if (!user) return;
-    const newStatus = user.status === 'ACTIVE' ? 'LOCKED' : 'ACTIVE';
-    await updateUser(id, { status: newStatus });
-    info(newStatus === 'ACTIVE' ? 'Đã mở khóa tài khoản' : 'Đã khóa tài khoản', user.fullName);
-  };
-
-  // Team management (Firestore synced)
-  const addTeam = async (teamData: Omit<Team, 'id' | 'createdAt' | 'memberIds'>): Promise<Team> => {
-    const newId = `team_${Date.now()}`;
-    const now = new Date().toISOString();
-    const leader = users.find((u) => u.id === teamData.leaderId);
-
-    const newTeam: Team = {
-      ...teamData,
-      id: newId,
-      leaderName: leader?.fullName,
-      memberIds: teamData.leaderId ? [teamData.leaderId] : [],
-      createdAt: now,
-    };
-
-    if (isFirebaseConfigured) {
-      try {
-        await setDoc(doc(db, 'teams', newId), newTeam);
-      } catch (err) {
-        console.error(err);
-      }
-    }
-
-    setTeams((prev) => [...prev, newTeam]);
-    success('Tạo nhóm thành công', `Đã tạo nhóm ${newTeam.name}`);
-    return newTeam;
-  };
-
-  const updateTeam = async (id: string, teamData: Partial<Team>): Promise<void> => {
-    const leader = teamData.leaderId ? users.find((u) => u.id === teamData.leaderId) : undefined;
-    const now = new Date().toISOString();
-    setTeams((prev) =>
-      prev.map((t) =>
-        t.id === id
-          ? {
-              ...t,
-              ...teamData,
-              leaderName: leader ? leader.fullName : t.leaderName,
-              updatedAt: now,
-            }
-          : t
-      )
-    );
-    if (isFirebaseConfigured) {
-      try {
-        await updateDoc(doc(db, 'teams', id), { ...teamData, updatedAt: now });
-      } catch (err) {
-        console.error(err);
-      }
-    }
-    success('Cập nhật nhóm thành công');
-  };
-
-  const deleteTeam = async (id: string): Promise<void> => {
-    setTeams((prev) => prev.filter((t) => t.id !== id));
-    if (isFirebaseConfigured) {
-      try {
-        await deleteDoc(doc(db, 'teams', id));
-      } catch (err) {
-        console.error(err);
-      }
-    }
-    info('Đã xóa nhóm');
-  };
-
-  // Customer Management (Firestore synced)
-  const addCustomer = async (customerData: Omit<Customer, 'id' | 'code' | 'createdAt' | 'updatedAt'>): Promise<Customer> => {
-    const newId = `cust_${Date.now()}`;
-    const count = customers.length + 1;
-    const newCode = `KH-${String(count).padStart(6, '0')}`;
-    const now = new Date().toISOString();
-
-    const assignedAgent = users.find((u) => u.id === customerData.assignedAgentId);
-    const team = teams.find((t) => t.id === (customerData.teamId || assignedAgent?.teamId));
-
-    const newCust: Customer = {
-      ...customerData,
-      id: newId,
-      code: newCode,
-      assignedAgentName: assignedAgent ? assignedAgent.fullName : customerData.assignedAgentName || 'Chưa phân công',
-      assignedAgentPhone: assignedAgent ? assignedAgent.phone : undefined,
-      teamId: team?.id || customerData.teamId,
-      teamName: team?.name || customerData.teamName,
-      interactionLogs: customerData.interactionLogs || [],
-      isDeleted: false,
-      createdAt: now,
-      createdBy: currentUser?.id || 'anonymous',
-      createdByName: currentUser?.fullName || 'Người dùng',
-      updatedAt: now,
-      updatedBy: currentUser?.id,
-    };
-
-    if (isFirebaseConfigured) {
-      try {
-        await setDoc(doc(db, 'customers', newId), newCust);
-      } catch (err) {
-        console.error('Add customer to Firestore error:', err);
-      }
-    }
-
-    setCustomers((prev) => [newCust, ...prev]);
-    success('Thêm khách hàng thành công', `Đã tạo khách hàng mã ${newCode} (${newCust.fullName})`);
-    return newCust;
-  };
-
-  const updateCustomer = async (id: string, data: Partial<Customer>): Promise<void> => {
-    const now = new Date().toISOString();
-    let updatedObj: Customer | null = null;
-
-    setCustomers((prev) =>
-      prev.map((c) => {
-        if (c.id === id) {
-          const assignedAgent = data.assignedAgentId ? users.find((u) => u.id === data.assignedAgentId) : undefined;
-          const team = data.teamId ? teams.find((t) => t.id === data.teamId) : undefined;
-
-          updatedObj = {
-            ...c,
-            ...data,
-            assignedAgentName: assignedAgent ? assignedAgent.fullName : (data.assignedAgentName !== undefined ? data.assignedAgentName : c.assignedAgentName),
-            assignedAgentPhone: assignedAgent ? assignedAgent.phone : c.assignedAgentPhone,
-            teamName: team ? team.name : (data.teamName !== undefined ? data.teamName : c.teamName),
-            updatedAt: now,
-            updatedBy: currentUser?.id,
-          };
-          return updatedObj;
-        }
-        return c;
-      })
-    );
-
-    if (isFirebaseConfigured && updatedObj) {
-      try {
-        await updateDoc(doc(db, 'customers', id), updatedObj as any);
-      } catch (err) {
-        console.error('Update customer in Firestore error:', err);
-      }
-    }
-    success('Cập nhật khách hàng thành công', 'Thông tin khách hàng đã được lưu.');
-  };
-
-  // Customer Soft Delete
-  const deleteCustomer = async (id: string, reason = 'Xóa vào thùng rác'): Promise<void> => {
-    const now = new Date().toISOString();
-    const updateData = {
-      isDeleted: true,
-      deletedAt: now,
-      deletedBy: currentUser?.id,
-      deleteReason: reason,
-    };
-
-    setCustomers((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, ...updateData } : c))
-    );
-
-    if (isFirebaseConfigured) {
-      try {
-        await updateDoc(doc(db, 'customers', id), updateData);
-      } catch (err) {
-        console.error('Soft delete customer error:', err);
-      }
-    }
-
-    info('Đã chuyển khách hàng vào thùng rác', 'Bạn có thể khôi phục lại bất kỳ lúc nào.');
-  };
-
-  // Customer Restore
-  const restoreCustomer = async (id: string): Promise<void> => {
-    const updateData = {
-      isDeleted: false,
-      deletedAt: undefined,
-      deletedBy: undefined,
-      deleteReason: undefined,
-    };
-
-    setCustomers((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, ...updateData } : c))
-    );
-
-    if (isFirebaseConfigured) {
-      try {
-        await updateDoc(doc(db, 'customers', id), updateData as any);
-      } catch (err) {
-        console.error('Restore customer error:', err);
-      }
-    }
-
-    success('Khôi phục khách hàng thành công', 'Khách hàng đã trở lại danh sách hoạt động.');
-  };
-
-  // Permanent Delete Customer
-  const permanentDeleteCustomer = async (id: string): Promise<void> => {
-    setCustomers((prev) => prev.filter((c) => c.id !== id));
-    if (isFirebaseConfigured) {
-      try {
-        await deleteDoc(doc(db, 'customers', id));
-      } catch (err) {
-        console.error('Permanent delete customer error:', err);
-      }
-    }
-    info('Đã xóa vĩnh viễn khách hàng');
-  };
-
-  // Add Interaction Log to Customer
-  const addCustomerInteraction = async (
-    customerId: string,
-    interaction: Omit<CustomerInteraction, 'id' | 'createdAt'>
-  ): Promise<void> => {
-    const targetCust = customers.find((c) => c.id === customerId);
-    if (!targetCust) return;
-
-    const newLogId = `log_${Date.now()}`;
-    const now = new Date().toISOString();
-    const newLog: CustomerInteraction = {
-      ...interaction,
-      id: newLogId,
-      createdAt: now,
-    };
-
-    const updatedLogs = [newLog, ...(targetCust.interactionLogs || [])];
-    const updatePayload: Partial<Customer> = {
-      interactionLogs: updatedLogs,
-      updatedAt: now,
-    };
-
-    if (interaction.nextActionDate) {
-      updatePayload.nextAppointmentDate = interaction.nextActionDate;
-      updatePayload.nextAppointmentNote = interaction.nextActionNote || interaction.title;
-    }
-
-    await updateCustomer(customerId, updatePayload);
-    success('Đã lưu nhật ký chăm sóc', `${interaction.title} (${newLog.agentName})`);
-  };
-
-  // Assign Customer to Agent
-  const assignCustomerAgent = async (customerId: string, agentId: string, transferNote?: string): Promise<void> => {
-    const agent = users.find((u) => u.id === agentId);
-    if (!agent) return;
-    const targetCust = customers.find((c) => c.id === customerId);
-    const now = new Date().toISOString();
-
-    const transferLog: CustomerInteraction = {
-      id: `log_${Date.now()}`,
-      date: now,
-      type: 'NOTE',
-      title: `Chuyển người phụ trách sang ${agent.fullName}`,
-      content: transferNote || `Chuyển giao khách hàng từ ${targetCust?.assignedAgentName || 'Hệ thống'} sang ${agent.fullName}`,
-      agentId: currentUser?.id || 'admin',
-      agentName: currentUser?.fullName || 'Quản trị viên',
-      createdAt: now,
-    };
-
-    const updatedLogs = [transferLog, ...(targetCust?.interactionLogs || [])];
-
-    await updateCustomer(customerId, {
-      assignedAgentId: agent.id,
-      assignedAgentName: agent.fullName,
-      assignedAgentPhone: agent.phone,
-      teamId: agent.teamId,
-      teamName: agent.teamName,
-      interactionLogs: updatedLogs,
-    });
-
-    success('Đã chuyển người phụ trách', `Giao khách hàng cho ${agent.fullName}`);
-  };
-
-  // Bulk Assign Customer Agent
-  const bulkAssignCustomerAgent = async (customerIds: string[], agentId: string): Promise<void> => {
-    if (customerIds.length === 0) return;
-    const agent = users.find((u) => u.id === agentId);
-    if (!agent) return;
-    const now = new Date().toISOString();
-
-    for (const cid of customerIds) {
-      await assignCustomerAgent(cid, agentId, `Chuyển giao hàng loạt sang ${agent.fullName}`);
-    }
-
-    success(`Đã phân công ${customerIds.length} khách hàng`, `Giao cho ${agent.fullName}`);
-  };
-
-  // Bulk Update Customer Status
-  const bulkUpdateCustomerStatus = async (customerIds: string[], status: Customer['status']): Promise<void> => {
-    if (customerIds.length === 0) return;
-    const now = new Date().toISOString();
-
-    setCustomers((prev) =>
-      prev.map((c) => (customerIds.includes(c.id) ? { ...c, status, updatedAt: now } : c))
-    );
-
-    if (isFirebaseConfigured) {
-      for (const id of customerIds) {
-        try {
-          await updateDoc(doc(db, 'customers', id), { status, updatedAt: now });
-        } catch (err) {
-          console.error(err);
-        }
-      }
-    }
-
-    success(`Đã chuyển trạng thái ${customerIds.length} khách hàng`, `Tất cả sang "${status}"`);
-  };
-
-  // Bulk Delete Customers
-  const bulkDeleteCustomers = async (customerIds: string[], reason = 'Xóa hàng loạt'): Promise<void> => {
-    if (customerIds.length === 0) return;
-    const now = new Date().toISOString();
-    const updatePayload = {
-      isDeleted: true,
-      deletedAt: now,
-      deletedBy: currentUser?.id,
-      deleteReason: reason,
-    };
-
-    setCustomers((prev) =>
-      prev.map((c) => (customerIds.includes(c.id) ? { ...c, ...updatePayload } : c))
-    );
-
-    if (isFirebaseConfigured) {
-      for (const id of customerIds) {
-        try {
-          await updateDoc(doc(db, 'customers', id), updatePayload);
-        } catch (err) {
-          console.error(err);
-        }
-      }
-    }
-
-    info(`Đã chuyển ${customerIds.length} khách hàng vào thùng rác`);
-  };
-
-  // Appointment Management (Firestore synced)
-  const addAppointment = async (appointmentData: Omit<Appointment, 'id' | 'createdAt'>): Promise<Appointment> => {
-    const newId = `apt_${Date.now()}`;
-    const now = new Date().toISOString();
-    const newApt: Appointment = {
-      ...appointmentData,
-      id: newId,
-      createdAt: now,
-    };
-
-    if (isFirebaseConfigured) {
-      try {
-        await setDoc(doc(db, 'appointments', newId), newApt);
-      } catch (err) {
-        console.error(err);
-      }
-    }
-
-    setAppointments((prev) => [newApt, ...prev]);
-    success('Đã lên lịch hẹn', newApt.title);
-    return newApt;
-  };
-
-  const updateAppointment = async (id: string, data: Partial<Appointment>): Promise<void> => {
-    setAppointments((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, ...data } : a))
-    );
-    if (isFirebaseConfigured) {
-      try {
-        await updateDoc(doc(db, 'appointments', id), data);
-      } catch (err) {
-        console.error(err);
-      }
-    }
-    success('Cập nhật lịch hẹn thành công');
-  };
-
-  const deleteAppointment = async (id: string): Promise<void> => {
-    setAppointments((prev) => prev.filter((a) => a.id !== id));
-    if (isFirebaseConfigured) {
-      try {
-        await deleteDoc(doc(db, 'appointments', id));
-      } catch (err) {
-        console.error(err);
-      }
-    }
-    info('Đã hủy lịch hẹn');
-  };
-
-  // Filtered Properties Computation
+  // Filtered Properties for standard views
   const filteredProperties = properties.filter((prop) => {
     if (prop.isDeleted) return false;
 
     if (filterState.searchQuery) {
-      const q = filterState.searchQuery.toLowerCase().trim();
-      const matchCode = prop.code?.toLowerCase().includes(q);
-      const matchTitle = prop.title?.toLowerCase().includes(q);
-      const matchAddress = prop.address?.toLowerCase().includes(q);
-      const matchOwner = prop.ownerName?.toLowerCase().includes(q) || prop.ownerPhone?.includes(q);
-      const matchLot = prop.cadastralLotNumber?.toLowerCase().includes(q) || prop.cadastralSheetNumber?.toLowerCase().includes(q);
-      if (!matchCode && !matchTitle && !matchAddress && !matchOwner && !matchLot) {
-        return false;
-      }
+      const q = filterState.searchQuery.toLowerCase();
+      const matchCode = prop.code.toLowerCase().includes(q);
+      const matchTitle = prop.title.toLowerCase().includes(q);
+      const matchAddress = prop.address.toLowerCase().includes(q);
+      const matchOwner = prop.ownerName.toLowerCase().includes(q);
+      const matchPhone = prop.ownerPhone.includes(q);
+      if (!matchCode && !matchTitle && !matchAddress && !matchOwner && !matchPhone) return false;
     }
 
     if (filterState.transactionType && filterState.transactionType !== 'ALL') {
-      if (filterState.transactionType === 'SALE' && prop.transactionType !== 'SALE' && prop.transactionType !== 'SALE_AND_RENT') return false;
-      if (filterState.transactionType === 'RENT' && prop.transactionType !== 'RENT' && prop.transactionType !== 'SALE_AND_RENT') return false;
-      if (filterState.transactionType === 'TRANSFER' && prop.transactionType !== 'TRANSFER') return false;
+      if (prop.transactionType !== filterState.transactionType) return false;
     }
 
     if (filterState.propertyType && filterState.propertyType !== 'ALL') {
@@ -1121,19 +1894,15 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     if (filterState.city && filterState.city !== 'ALL') {
-      if (!prop.city?.includes(filterState.city)) return false;
+      if (prop.city !== filterState.city) return false;
     }
 
     if (filterState.district && filterState.district !== 'ALL') {
-      if (!prop.district?.includes(filterState.district)) return false;
+      if (prop.district !== filterState.district) return false;
     }
 
     if (filterState.status && filterState.status !== 'ALL') {
       if (prop.status !== filterState.status) return false;
-    }
-
-    if (filterState.direction && filterState.direction !== 'ALL') {
-      if (prop.direction !== filterState.direction) return false;
     }
 
     if (filterState.assignedAgentId && filterState.assignedAgentId !== 'ALL') {
@@ -1152,7 +1921,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (filterState.maxArea !== undefined && prop.landArea > filterState.maxArea) return false;
 
     if (filterState.bedrooms !== undefined && (prop.bedrooms || 0) < filterState.bedrooms) return false;
-
     if (filterState.hasImagesOnly && (!prop.images || prop.images.length === 0)) return false;
 
     return true;
@@ -1166,22 +1934,33 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         teams,
         customers,
         appointments,
+        matches,
+        transactions,
+        rentalDeals,
+        rentalContracts,
+        rentalPayments,
+        commissions,
+        auditLogs,
+        notifications,
         systemSettings,
         isLoading,
         filterState,
         setFilterState,
         resetFilters,
         filteredProperties,
+
         addProperty,
         updateProperty,
         deleteProperty,
         restoreProperty,
+        permanentDeleteProperty,
         updatePropertyStatus,
         assignPropertyAgent,
         bulkUpdateStatus,
         bulkAssignAgent,
         bulkDeleteProperties,
         checkDuplicateProperty,
+
         addUser,
         updateUser,
         updateUserAvatar,
@@ -1189,6 +1968,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         addTeam,
         updateTeam,
         deleteTeam,
+
         addCustomer,
         updateCustomer,
         deleteCustomer,
@@ -1200,11 +1980,52 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         bulkUpdateCustomerStatus,
         bulkDeleteCustomers,
         checkDuplicateCustomerPhone,
+
+        addMatch,
+        updateMatch,
+        deleteMatch,
+        markMatchSent,
+
         addAppointment,
         updateAppointment,
         deleteAppointment,
+        rescheduleAppointment,
+        completeAppointment,
+
+        addTransaction,
+        updateTransaction,
+        updateTransactionStatus,
+        deleteTransaction,
+
+        addRentalDeal,
+        updateRentalDeal,
+        updateRentalDealStatus,
+        deleteRentalDeal,
+
+        addRentalContract,
+        updateRentalContract,
+        renewRentalContract,
+        terminateRentalContract,
+        deleteRentalContract,
+
+        addRentalPayment,
+        updateRentalPayment,
+        markPaymentPaid,
+
+        addCommission,
+        updateCommission,
+        updateCommissionSplits,
+        markCommissionSplitPaid,
+        deleteCommission,
+
+        addAuditLog,
+        addNotification,
+        markNotificationAsRead,
+        markAllNotificationsAsRead,
+
         updateSystemSettings,
         restoreDefaultLogo,
+
         seedInitialDataToFirestore,
         resetDemoData,
       }}
@@ -1221,4 +2042,3 @@ export const useData = () => {
   }
   return context;
 };
-

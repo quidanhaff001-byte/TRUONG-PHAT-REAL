@@ -19,18 +19,30 @@ import {
   DollarSign,
   Layers,
   Sparkles,
-  CheckCircle,
+  CheckCircle2,
+  XCircle,
+  ChevronLeft,
+  ChevronRight,
+  RefreshCw,
+  Database,
+  CloudCheck,
 } from 'lucide-react';
 import {
   Property,
-  TransactionType,
   PropertyType,
   PropertyStatus,
   Direction,
   LegalType,
+  PropertyImageItem,
 } from '../../types';
 import { compressImage } from '../../utils/imageCompressor';
-import { uploadPropertyImage } from '../../utils/fileUpload';
+import {
+  validatePropertyImageFile,
+  uploadPropertyImageToStorage,
+  formatFileSize,
+} from '../../utils/fileUpload';
+import { generatePropertyCode } from '../../utils/formatters';
+import { isStorageConfigured } from '../../config/firebase';
 import { DuplicateWarningModal } from '../../components/common/DuplicateWarningModal';
 
 const VIETNAM_CITIES = ['An Giang', 'Cần Thơ', 'Kiên Giang', 'Đồng Tháp', 'Hồ Chí Minh', 'Hà Nội', 'Đà Nẵng', 'Bình Dương'];
@@ -56,6 +68,24 @@ const LEGAL_TYPES: LegalType[] = [
   'Giấy tờ tay hợp lệ',
 ];
 
+export interface StagedImageItem {
+  id: string;
+  isExisting: boolean;
+  file?: File;
+  previewUrl: string;
+  fileName: string;
+  originalSize: number;
+  compressedSize?: number;
+  width?: number;
+  height?: number;
+  isCover: boolean;
+  sortOrder: number;
+  status: 'pending' | 'uploading' | 'success' | 'error';
+  progress: number;
+  errorMessage?: string;
+  itemMetadata?: PropertyImageItem;
+}
+
 export const PropertyForm: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const isEditMode = Boolean(id);
@@ -67,6 +97,10 @@ export const PropertyForm: React.FC = () => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [isDragOver, setIsDragOver] = useState<boolean>(false);
+  const [stagedImages, setStagedImages] = useState<StagedImageItem[]>([]);
+  const [uploadStatusText, setUploadStatusText] = useState<string>('');
+
   const [duplicateWarning, setDuplicateWarning] = useState<{
     isOpen: boolean;
     reasons: string[];
@@ -140,6 +174,7 @@ export const PropertyForm: React.FC = () => {
     // Images
     images: [],
     coverImage: '',
+    imageDetails: [],
 
     // Assignment
     assignedAgentId: currentUser?.id || users[0]?.id || '',
@@ -159,6 +194,38 @@ export const PropertyForm: React.FC = () => {
           return;
         }
         setFormData(existing);
+
+        // Populate stagedImages with existing images
+        const existingImgs = existing.images || (existing.coverImage ? [existing.coverImage] : []);
+        const stagedList: StagedImageItem[] = existingImgs.map((imgUrl, idx) => {
+          const detail = existing.imageDetails?.find((d) => d.downloadURL === imgUrl);
+          return {
+            id: detail?.id || `existing_${idx}_${Date.now()}`,
+            isExisting: true,
+            previewUrl: imgUrl,
+            fileName: detail?.fileName || `Ảnh ${idx + 1}`,
+            originalSize: detail?.size || 0,
+            compressedSize: detail?.size,
+            isCover: existing.coverImage ? existing.coverImage === imgUrl : idx === 0,
+            sortOrder: detail?.sortOrder ?? idx,
+            status: 'success',
+            progress: 100,
+            itemMetadata: detail || {
+              id: `existing_${idx}`,
+              propertyId: existing.id,
+              fileName: `Ảnh ${idx + 1}`,
+              storagePath: '',
+              downloadURL: imgUrl,
+              contentType: 'image/jpeg',
+              size: 0,
+              isCover: existing.coverImage ? existing.coverImage === imgUrl : idx === 0,
+              sortOrder: idx,
+              uploadedAt: existing.createdAt || new Date().toISOString(),
+              uploadedBy: existing.assignedAgentName || 'Agent',
+            },
+          };
+        });
+        setStagedImages(stagedList);
       } else {
         error('Không tìm thấy BĐS', 'Sản phẩm không tồn tại hoặc đã bị xóa.');
         navigate('/properties');
@@ -183,60 +250,153 @@ export const PropertyForm: React.FC = () => {
     });
   };
 
-  // Image Upload with Smart Compression & Firebase Storage
-  const handleImageFiles = async (files: FileList | null) => {
+  // Stage selected image files with client-side compression and validation
+  const handleSelectFiles = async (files: FileList | File[] | null) => {
     if (!files || files.length === 0) return;
 
-    setIsUploading(true);
-    const newImageUrls: string[] = [];
-    const propertyPrefix = formData.code || 'BDS';
+    const fileArray = Array.from(files);
+    const MAX_TOTAL_IMAGES = 20;
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      if (!file.type.startsWith('image/')) continue;
+    if (stagedImages.length + fileArray.length > MAX_TOTAL_IMAGES) {
+      error(
+        'Vượt quá giới hạn',
+        `Mỗi bất động sản chỉ được lưu tối đa ${MAX_TOTAL_IMAGES} ảnh (hiện có: ${stagedImages.length} ảnh).`
+      );
+      return;
+    }
 
+    const newStagedList: StagedImageItem[] = [];
+    const existingFileInfo = stagedImages.map((s) => ({ name: s.fileName, size: s.originalSize }));
+
+    for (const file of fileArray) {
+      // 1. Validation
+      const validation = validatePropertyImageFile(file, existingFileInfo);
+      if (!validation.valid) {
+        warning('Bỏ qua ảnh không hợp lệ', validation.error || 'Ảnh không hợp lệ.');
+        continue;
+      }
+
+      existingFileInfo.push({ name: file.name, size: file.size });
+
+      // 2. Client-side compression for instant thumbnail and optimized upload
       try {
-        const uploadedUrl = await uploadPropertyImage(file, propertyPrefix);
-        newImageUrls.push(uploadedUrl);
-      } catch (err) {
-        console.error('Upload image error:', err);
+        const compressed = await compressImage(file, 1920, 1440, 0.85);
+        const stagedId = `staged_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+        
+        newStagedList.push({
+          id: stagedId,
+          isExisting: false,
+          file: compressed.file,
+          previewUrl: compressed.dataUrl,
+          fileName: file.name,
+          originalSize: file.size,
+          compressedSize: compressed.compressedSize,
+          width: compressed.width,
+          height: compressed.height,
+          isCover: false,
+          sortOrder: stagedImages.length + newStagedList.length,
+          status: 'pending',
+          progress: 0,
+        });
+      } catch (err: any) {
+        console.error('Compress image preview error:', err);
+        // Fallback using URL.createObjectURL for preview
+        const objUrl = URL.createObjectURL(file);
+        newStagedList.push({
+          id: `staged_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+          isExisting: false,
+          file: file,
+          previewUrl: objUrl,
+          fileName: file.name,
+          originalSize: file.size,
+          isCover: false,
+          sortOrder: stagedImages.length + newStagedList.length,
+          status: 'pending',
+          progress: 0,
+        });
       }
     }
 
-    setFormData((prev) => {
-      const currentImages = prev.images || [];
-      const combined = [...currentImages, ...newImageUrls];
-      return {
-        ...prev,
-        images: combined,
-        coverImage: prev.coverImage || combined[0] || '',
-      };
-    });
+    if (newStagedList.length > 0) {
+      setStagedImages((prev) => {
+        const combined = [...prev, ...newStagedList];
+        // If no cover image yet, set the first one as cover
+        const hasCover = combined.some((img) => img.isCover);
+        if (!hasCover && combined.length > 0) {
+          combined[0].isCover = true;
+        }
+        return combined;
+      });
 
-    setIsUploading(false);
-    success(`Đã thêm ${newImageUrls.length} ảnh`, 'Đã lưu trữ an toàn trên Firebase Storage.');
+      success(
+        `Đã thêm ${newStagedList.length} ảnh vào danh sách`,
+        'Ảnh đã được nén tối ưu, sẵn sàng tải lên Firebase Storage khi bấm Lưu.'
+      );
+    }
+
+    // Reset input value
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   };
 
-  const handleRemoveImage = (index: number) => {
-    setFormData((prev) => {
-      const newImages = [...(prev.images || [])];
-      const removed = newImages.splice(index, 1)[0];
-      let newCover = prev.coverImage;
-      if (newCover === removed) {
-        newCover = newImages[0] || '';
+  // Set Cover Image
+  const handleSetCover = (stagedId: string) => {
+    setStagedImages((prev) =>
+      prev.map((img) => ({
+        ...img,
+        isCover: img.id === stagedId,
+      }))
+    );
+    success('Đã chọn làm ảnh bìa');
+  };
+
+  // Move Image Left / Right (Reorder)
+  const handleMoveImage = (index: number, direction: 'left' | 'right') => {
+    setStagedImages((prev) => {
+      const newList = [...prev];
+      const targetIndex = direction === 'left' ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= newList.length) return prev;
+
+      const temp = newList[index];
+      newList[index] = newList[targetIndex];
+      newList[targetIndex] = temp;
+
+      // Re-assign sortOrder
+      return newList.map((item, idx) => ({ ...item, sortOrder: idx }));
+    });
+  };
+
+  // Remove Staged Image
+  const handleRemoveImage = (stagedId: string) => {
+    setStagedImages((prev) => {
+      const removed = prev.find((item) => item.id === stagedId);
+      if (removed && !removed.isExisting && removed.previewUrl?.startsWith('blob:')) {
+        URL.revokeObjectURL(removed.previewUrl);
       }
-      return { ...prev, images: newImages, coverImage: newCover };
+
+      const filtered = prev.filter((item) => item.id !== stagedId);
+      // If removed item was cover, assign new cover to first item
+      if (removed?.isCover && filtered.length > 0) {
+        filtered[0].isCover = true;
+      }
+      return filtered.map((item, idx) => ({ ...item, sortOrder: idx }));
     });
   };
 
-  const handleSetCover = (url: string) => {
-    setFormData((prev) => ({ ...prev, coverImage: url }));
-    success('Đã chọn ảnh đại diện');
+  // Retry failed image uploads
+  const handleRetryFailedImages = () => {
+    setStagedImages((prev) =>
+      prev.map((img) =>
+        img.status === 'error' ? { ...img, status: 'pending', progress: 0, errorMessage: undefined } : img
+      )
+    );
   };
 
+  // Form Validation
   const validateForm = () => {
     if (!formData.title?.trim()) {
-      error('Thiếu thông tin', 'Vui lòng nhập tiêu đề bất động sản.');
+      error('Thiếu thông tin tiêu đề', 'Vui lòng nhập tiêu đề bất động sản.');
       return false;
     }
     if (!formData.ownerName?.trim() || !formData.ownerPhone?.trim()) {
@@ -244,13 +404,16 @@ export const PropertyForm: React.FC = () => {
       return false;
     }
     if (!formData.landArea || formData.landArea <= 0) {
-      error('Diện tích không hợp lệ', 'Vui lòng nhập diện tích đất lớn hơn 0.');
+      error('Diện tích không hợp lệ', 'Vui lòng nhập diện tích đất lớn hơn 0 m².');
       return false;
     }
     return true;
   };
 
-  // Submit Handler
+  // Core Submit Handler with 3-Step Image Flow:
+  // Step 1: Validate form & duplicate check
+  // Step 2: Establish property ID (pre-create ID for Storage path)
+  // Step 3: Upload pending images to properties/{propertyId}/images/{fileName} -> Save metadata
   const handleSave = async (bypassDuplicate = false) => {
     if (!validateForm()) return;
 
@@ -267,18 +430,125 @@ export const PropertyForm: React.FC = () => {
       }
     }
 
+    setIsUploading(true);
+    setUploadStatusText('Đang chuẩn bị lưu trữ...');
+
+    // 1. Establish property ID and code
+    const propertyId = id || (formData as any).id || `prop_${Date.now()}`;
+    const sequence = properties.length + 1;
+    const propertyCode = formData.code || generatePropertyCode(formData.transactionType || 'SALE', sequence);
+
+    // 2. Upload pending images to Firebase Storage
+    const finalImageDetails: PropertyImageItem[] = [];
+    const finalImageUrls: string[] = [];
+    let hasUploadErrors = false;
+
+    const updatedStaged = [...stagedImages];
+
+    for (let i = 0; i < updatedStaged.length; i++) {
+      const item = updatedStaged[i];
+
+      // If already uploaded previously
+      if (item.isExisting && item.status === 'success' && item.itemMetadata) {
+        finalImageDetails.push({
+          ...item.itemMetadata,
+          isCover: item.isCover,
+          sortOrder: i,
+        });
+        finalImageUrls.push(item.previewUrl);
+        continue;
+      }
+
+      // If needs upload (pending or retry)
+      if (item.file) {
+        setUploadStatusText(`Đang tải ảnh ${i + 1}/${updatedStaged.length}: ${item.fileName}...`);
+        
+        // Update item state to uploading
+        updatedStaged[i] = { ...item, status: 'uploading', progress: 10 };
+        setStagedImages([...updatedStaged]);
+
+        try {
+          const uploadedMeta = await uploadPropertyImageToStorage(item.file, propertyId, {
+            isCover: item.isCover,
+            sortOrder: i,
+            uploadedBy: currentUser?.fullName || currentUser?.email || 'Môi giới',
+            onProgress: (p) => {
+              updatedStaged[i] = { ...updatedStaged[i], progress: p };
+              setStagedImages([...updatedStaged]);
+            },
+          });
+
+          updatedStaged[i] = {
+            ...updatedStaged[i],
+            status: 'success',
+            progress: 100,
+            previewUrl: uploadedMeta.downloadURL,
+            itemMetadata: uploadedMeta,
+          };
+          setStagedImages([...updatedStaged]);
+
+          finalImageDetails.push(uploadedMeta);
+          finalImageUrls.push(uploadedMeta.downloadURL);
+        } catch (err: any) {
+          console.error(`Lỗi tải ảnh ${item.fileName}:`, err);
+          updatedStaged[i] = {
+            ...updatedStaged[i],
+            status: 'error',
+            progress: 0,
+            errorMessage: err.message || 'Lỗi tải ảnh lên Firebase Storage',
+          };
+          setStagedImages([...updatedStaged]);
+          hasUploadErrors = true;
+        }
+      }
+    }
+
+    if (hasUploadErrors) {
+      setIsUploading(false);
+      setUploadStatusText('');
+      error(
+        'Tải ảnh chưa hoàn tất',
+        'Có ảnh không thể tải lên Firebase Storage. Vui lòng kiểm tra các ảnh bị đánh dấu lỗi và thử lại.'
+      );
+      return;
+    }
+
+    // Determine cover image URL
+    const coverItem = updatedStaged.find((s) => s.isCover);
+    const coverImageUrl = coverItem?.previewUrl || finalImageUrls[0] || '';
+
+    // 3. Save Property document to Firestore / local state
+    setUploadStatusText('Đang lưu thông tin BĐS...');
     try {
+      const propertyPayload: Partial<Property> = {
+        ...formData,
+        id: propertyId,
+        code: propertyCode,
+        images: finalImageUrls,
+        coverImage: coverImageUrl,
+        imageDetails: finalImageDetails,
+      };
+
       if (isEditMode && id) {
-        await updateProperty(id, formData);
+        await updateProperty(id, propertyPayload);
+        success('Cập nhật BĐS thành công', `Đã lưu các thay đổi cho mã ${propertyCode}.`);
         navigate(`/properties/${id}`);
       } else {
-        const created = await addProperty(formData as any);
+        const created = await addProperty(propertyPayload as any);
+        success('Tiếp nhận BĐS thành công', `Đã tạo nguồn hàng mới với mã ${created.code}.`);
         navigate(`/properties/${created.id}`);
       }
     } catch (err: any) {
-      error('Lưu thất bại', err.message);
+      console.error('Save property error:', err);
+      error('Lỗi khi lưu BĐS', err.message || 'Không thể lưu thông tin vào cơ sở dữ liệu.');
+    } finally {
+      setIsUploading(false);
+      setUploadStatusText('');
     }
   };
+
+  const failedCount = stagedImages.filter((img) => img.status === 'error').length;
+  const pendingCount = stagedImages.filter((img) => img.status === 'pending').length;
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-12">
@@ -293,11 +563,19 @@ export const PropertyForm: React.FC = () => {
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div>
-            <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-              {isEditMode ? `Chỉnh sửa BĐS ${formData.code || ''}` : 'Tiếp nhận ký gửi BĐS mới'}
-            </h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+                {isEditMode ? `Chỉnh sửa BĐS ${formData.code || ''}` : 'Tiếp nhận ký gửi BĐS mới'}
+              </h1>
+              {isStorageConfigured && (
+                <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  Storage Sẵn sàng
+                </span>
+              )}
+            </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              Nhập đầy đủ thông số kỹ thuật, pháp lý và bảo mật thông tin chủ nhà.
+              Nhập đầy đủ thông số kỹ thuật, quản lý ảnh thực tế và bảo mật thông tin chủ nhà.
             </p>
           </div>
         </div>
@@ -310,128 +588,91 @@ export const PropertyForm: React.FC = () => {
           >
             Hủy bỏ
           </button>
+
           <button
             type="button"
             onClick={() => handleSave(false)}
-            className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-bold text-xs rounded-xl shadow-md shadow-amber-500/20 transition-all active:scale-98"
+            disabled={isUploading}
+            className="flex items-center gap-2 px-5 py-2.5 bg-[#001f3f] hover:bg-[#002e5c] text-white rounded-xl text-xs font-bold shadow-md shadow-slate-900/10 transition-all disabled:opacity-50"
           >
-            <Save className="w-4 h-4" />
-            <span>{isEditMode ? 'Lưu thay đổi' : 'Tạo mới nguồn hàng'}</span>
+            {isUploading ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin text-[#D4AF37]" />
+                <span>{uploadStatusText || 'Đang xử lý...'}</span>
+              </>
+            ) : (
+              <>
+                <Save className="w-4 h-4 text-[#D4AF37]" />
+                <span>{isEditMode ? 'Lưu thay đổi' : 'Tạo mới nguồn hàng'}</span>
+              </>
+            )}
           </button>
         </div>
       </div>
 
       {/* Main Form Fields */}
       <div className="space-y-6">
-        {/* SECTION 1: Transaction Type & Basic Info */}
+        {/* SECTION 1: Transaction Type & Categories */}
         <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
           <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2 border-b border-slate-100 pb-3">
             <Building2 className="w-4 h-4 text-amber-600" />
-            1. Phân loại giao dịch & Thông tin cơ bản
+            1. Loại hình giao dịch & Phân loại BĐS
           </h2>
 
-          {/* Transaction Type Selection */}
-          <div>
-            <label className="block text-xs font-bold text-slate-800 mb-2">Loại hình nghiệp vụ *</label>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-              {[
-                { label: 'Ký gửi Bán', value: 'SALE', desc: 'Bán nhà đất, căn hộ' },
-                { label: 'Ký gửi Cho thuê', value: 'RENT', desc: 'Thuê mặt bằng, phòng' },
-                { label: 'Sang nhượng', value: 'TRANSFER', desc: 'Sang nhượng quán/shop' },
-                { label: 'Bán & Cho thuê', value: 'SALE_AND_RENT', desc: 'Song song bán hoặc thuê' },
-              ].map((item) => (
-                <button
-                  key={item.value}
-                  type="button"
-                  onClick={() => setFormData({ ...formData, transactionType: item.value as any })}
-                  className={`p-3 rounded-xl text-left border transition-all ${
-                    formData.transactionType === item.value
-                      ? 'border-amber-500 bg-amber-50/50 ring-2 ring-amber-500/20 text-slate-950'
-                      : 'border-slate-200 hover:border-slate-300 text-slate-700 bg-white'
-                  }`}
-                >
-                  <div className="font-bold text-xs">{item.label}</div>
-                  <div className="text-[11px] text-slate-500 mt-0.5">{item.desc}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Property Type & Status */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Loại bất động sản *</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Nhu cầu giao dịch *</label>
+              <select
+                value={formData.transactionType}
+                onChange={(e) => setFormData({ ...formData, transactionType: e.target.value as any })}
+                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-amber-500"
+              >
+                <option value="SALE">Bán bất động sản (SALE)</option>
+                <option value="RENT">Cho thuê (RENT)</option>
+                <option value="TRANSFER">Sang nhượng mặt bằng (TRANSFER)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Loại hình sản phẩm *</label>
               <select
                 value={formData.propertyType}
-                onChange={(e) => setFormData({ ...formData, propertyType: e.target.value as PropertyType })}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-amber-500"
+                onChange={(e) => setFormData({ ...formData, propertyType: e.target.value as any })}
+                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-amber-500"
               >
-                {PROPERTY_TYPES.map((type) => (
-                  <option key={type} value={type}>
-                    {type}
-                  </option>
+                {PROPERTY_TYPES.map((t) => (
+                  <option key={t} value={t}>{t}</option>
                 ))}
               </select>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Trạng thái hiện tại</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Trạng thái hiện tại *</label>
               <select
                 value={formData.status}
-                onChange={(e) => setFormData({ ...formData, status: e.target.value as PropertyStatus })}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-amber-500"
+                onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
+                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-amber-500"
               >
+                <option value="Mới tiếp nhận">Mới tiếp nhận</option>
                 <option value="Đang bán">Đang bán</option>
                 <option value="Đang cho thuê">Đang cho thuê</option>
-                <option value="Đang sang nhượng">Đang sang nhượng</option>
-                <option value="Mới tiếp nhận">Mới tiếp nhận</option>
-                <option value="Chờ xác minh">Chờ xác minh</option>
-                <option value="Có khách quan tâm">Có khách quan tâm</option>
                 <option value="Đang thương lượng">Đang thương lượng</option>
                 <option value="Đã nhận cọc">Đã nhận cọc</option>
-                <option value="Đã hoàn tất">Đã hoàn tất</option>
-                <option value="Tạm ngưng giao dịch">Tạm ngưng giao dịch</option>
+                <option value="Đã bán">Đã bán</option>
+                <option value="Tạm ngưng">Tạm ngưng giao dịch</option>
               </select>
             </div>
           </div>
 
-          {/* Title */}
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">
-              Tiêu đề hiển thị (Quảng cáo / Nội bộ) *
-            </label>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">Tiêu đề tin đăng *</label>
             <input
               type="text"
-              placeholder="VD: Bán gấp biệt thự góc 2 mặt tiền đường Nguyễn Huệ Quận 1 DT 120m2"
+              placeholder="VD: Bán nhà phố mặt tiền Nguyễn Văn Cừ, P. Cầu Kho, Quận 1 (4.5x18m, 4 lầu đẹp)"
               value={formData.title}
               onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-amber-500"
             />
-          </div>
-
-          {/* Highlights & Description */}
-          <div className="grid grid-cols-1 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Điểm nổi bật ngắn</label>
-              <input
-                type="text"
-                placeholder="VD: Hẻm xe hơi tránh nhau, nở hậu tài lộc, dòng tiền cho thuê 40tr/tháng..."
-                value={formData.highlights}
-                onChange={(e) => setFormData({ ...formData, highlights: e.target.value })}
-                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Mô tả chi tiết</label>
-              <textarea
-                rows={3}
-                placeholder="Mô tả kỹ kết cấu, tiện ích xung quanh, lý do bán/thuê..."
-                value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500 leading-relaxed"
-              />
-            </div>
           </div>
         </div>
 
@@ -439,21 +680,19 @@ export const PropertyForm: React.FC = () => {
         <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
           <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2 border-b border-slate-100 pb-3">
             <MapPin className="w-4 h-4 text-amber-600" />
-            2. Vị trí & Địa chỉ
+            2. Vị trí & Địa chỉ chi tiết
           </h2>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">Tỉnh / Thành phố *</label>
               <select
                 value={formData.city}
                 onChange={(e) => handleAddressFieldChange('city', e.target.value)}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-amber-500"
+                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
               >
                 {VIETNAM_CITIES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
+                  <option key={c} value={c}>{c}</option>
                 ))}
               </select>
             </div>
@@ -462,9 +701,9 @@ export const PropertyForm: React.FC = () => {
               <label className="block text-xs font-semibold text-slate-700 mb-1">Quận / Huyện *</label>
               <input
                 type="text"
-                placeholder="VD: TP Long Xuyên, TP Châu Đốc, Thoại Sơn..."
                 value={formData.district}
                 onChange={(e) => handleAddressFieldChange('district', e.target.value)}
+                placeholder="VD: Quận 1, Long Xuyên..."
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
               />
             </div>
@@ -473,55 +712,54 @@ export const PropertyForm: React.FC = () => {
               <label className="block text-xs font-semibold text-slate-700 mb-1">Phường / Xã</label>
               <input
                 type="text"
-                placeholder="VD: Phường Mỹ Bình, Núi Sam..."
                 value={formData.ward}
                 onChange={(e) => handleAddressFieldChange('ward', e.target.value)}
+                placeholder="VD: Phường Bến Nghé"
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
               />
             </div>
-          </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">Tên đường</label>
               <input
                 type="text"
-                placeholder="VD: Nguyễn Huệ"
                 value={formData.street}
                 onChange={(e) => handleAddressFieldChange('street', e.target.value)}
-                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Số nhà / Số phòng</label>
-              <input
-                type="text"
-                placeholder="VD: 88/12"
-                value={formData.houseNumber}
-                onChange={(e) => handleAddressFieldChange('houseNumber', e.target.value)}
+                placeholder="VD: Nguyễn Huệ, Lê Lợi..."
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
               />
             </div>
           </div>
 
-          {/* Full address preview */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Địa chỉ đầy đủ hiển thị</label>
-            <input
-              type="text"
-              value={formData.address}
-              onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-              className="w-full px-3.5 py-2 bg-slate-100 border border-slate-200 rounded-xl text-xs font-medium text-slate-900 focus:outline-none focus:border-amber-500"
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Số nhà / Số thửa</label>
+              <input
+                type="text"
+                value={formData.houseNumber}
+                onChange={(e) => handleAddressFieldChange('houseNumber', e.target.value)}
+                placeholder="VD: 128/4A"
+                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
+              />
+            </div>
+
+            <div className="sm:col-span-2">
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Địa chỉ đầy đủ (Tự động tổng hợp)</label>
+              <input
+                type="text"
+                value={formData.address}
+                onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                className="w-full px-3.5 py-2 bg-slate-100 border border-slate-200 rounded-xl text-xs text-slate-900 font-medium focus:outline-none focus:border-amber-500"
+              />
+            </div>
           </div>
         </div>
 
-        {/* SECTION 3: Technical Specifications & Dimensions */}
+        {/* SECTION 3: Technical Specs & Price */}
         <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
           <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2 border-b border-slate-100 pb-3">
             <Layers className="w-4 h-4 text-amber-600" />
-            3. Thông số kỹ thuật & Kích thước
+            3. Thông số kỹ thuật & Giá giao dịch
           </h2>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -530,8 +768,8 @@ export const PropertyForm: React.FC = () => {
               <input
                 type="number"
                 value={formData.landArea || ''}
-                onChange={(e) => setFormData({ ...formData, landArea: Number(e.target.value) })}
-                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500 font-bold"
+                onChange={(e) => setFormData({ ...formData, landArea: parseFloat(e.target.value) || 0 })}
+                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-amber-500"
               />
             </div>
 
@@ -540,18 +778,18 @@ export const PropertyForm: React.FC = () => {
               <input
                 type="number"
                 value={formData.usableArea || ''}
-                onChange={(e) => setFormData({ ...formData, usableArea: Number(e.target.value) })}
+                onChange={(e) => setFormData({ ...formData, usableArea: parseFloat(e.target.value) || 0 })}
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Mặt tiền / Ngang (m)</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Chiều ngang (m)</label>
               <input
                 type="number"
                 step="0.1"
                 value={formData.width || ''}
-                onChange={(e) => setFormData({ ...formData, width: Number(e.target.value) })}
+                onChange={(e) => setFormData({ ...formData, width: parseFloat(e.target.value) || 0 })}
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
               />
             </div>
@@ -562,7 +800,7 @@ export const PropertyForm: React.FC = () => {
                 type="number"
                 step="0.1"
                 value={formData.length || ''}
-                onChange={(e) => setFormData({ ...formData, length: Number(e.target.value) })}
+                onChange={(e) => setFormData({ ...formData, length: parseFloat(e.target.value) || 0 })}
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
               />
             </div>
@@ -574,7 +812,7 @@ export const PropertyForm: React.FC = () => {
               <input
                 type="number"
                 value={formData.floors || ''}
-                onChange={(e) => setFormData({ ...formData, floors: Number(e.target.value) })}
+                onChange={(e) => setFormData({ ...formData, floors: parseInt(e.target.value) || 0 })}
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
               />
             </div>
@@ -584,19 +822,22 @@ export const PropertyForm: React.FC = () => {
               <input
                 type="number"
                 value={formData.bedrooms || ''}
-                onChange={(e) => setFormData({ ...formData, bedrooms: Number(e.target.value) })}
+                onChange={(e) => setFormData({ ...formData, bedrooms: parseInt(e.target.value) || 0 })}
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Số WC</label>
-              <input
-                type="number"
-                value={formData.bathrooms || ''}
-                onChange={(e) => setFormData({ ...formData, bathrooms: Number(e.target.value) })}
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Hướng nhà chính</label>
+              <select
+                value={formData.direction}
+                onChange={(e) => setFormData({ ...formData, direction: e.target.value as any })}
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
-              />
+              >
+                {DIRECTIONS.map((d) => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
+              </select>
             </div>
 
             <div>
@@ -605,219 +846,74 @@ export const PropertyForm: React.FC = () => {
                 type="number"
                 step="0.5"
                 value={formData.roadWidth || ''}
-                onChange={(e) => setFormData({ ...formData, roadWidth: Number(e.target.value) })}
+                onChange={(e) => setFormData({ ...formData, roadWidth: parseFloat(e.target.value) || 0 })}
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
               />
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-100">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Hướng nhà chính</label>
-              <select
-                value={formData.direction}
-                onChange={(e) => setFormData({ ...formData, direction: e.target.value as Direction })}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-amber-500"
-              >
-                {DIRECTIONS.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Kết cấu xây dựng</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                {formData.transactionType === 'SALE' ? 'Giá chào bán (VNĐ) *' : formData.transactionType === 'RENT' ? 'Giá cho thuê (VNĐ/tháng) *' : 'Giá sang nhượng (VNĐ) *'}
+              </label>
               <input
-                type="text"
-                placeholder="VD: 1 Trệt 3 Lầu sân thượng BTCT..."
-                value={formData.structure}
-                onChange={(e) => setFormData({ ...formData, structure: e.target.value })}
-                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
+                type="number"
+                value={
+                  formData.transactionType === 'SALE'
+                    ? formData.salePrice || ''
+                    : formData.transactionType === 'RENT'
+                    ? formData.rentPriceMonthly || ''
+                    : formData.transferPrice || ''
+                }
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value) || undefined;
+                  if (formData.transactionType === 'SALE') setFormData({ ...formData, salePrice: val });
+                  else if (formData.transactionType === 'RENT') setFormData({ ...formData, rentPriceMonthly: val });
+                  else setFormData({ ...formData, transferPrice: val });
+                }}
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-amber-700 focus:outline-none focus:border-amber-500"
+                placeholder="VD: 12500000000 (12.5 tỷ)"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Nơi giữ chìa khóa / Pass cửa</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Tỷ lệ hoa hồng thỏa thuận</label>
               <input
-                type="text"
-                placeholder="VD: Chìa khóa gửi công ty, pass: 1234"
-                value={formData.keysLocation}
-                onChange={(e) => setFormData({ ...formData, keysLocation: e.target.value })}
-                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
+                type="number"
+                step="0.1"
+                value={formData.commissionRateSale || 1.5}
+                onChange={(e) => setFormData({ ...formData, commissionRateSale: parseFloat(e.target.value) || 0 })}
+                placeholder="VD: 1.5 (%) hoặc 1 (tháng)"
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
               />
             </div>
           </div>
         </div>
 
-        {/* SECTION 4: Transaction Specifics & Pricing */}
-        <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
-          <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2 border-b border-slate-100 pb-3">
-            <DollarSign className="w-4 h-4 text-amber-600" />
-            4. Giá cả, Hoa hồng & Nghiệp vụ chi tiết
-          </h2>
-
-          {/* If SALE or SALE_AND_RENT */}
-          {(formData.transactionType === 'SALE' || formData.transactionType === 'SALE_AND_RENT') && (
-            <div className="p-4 bg-emerald-50/60 rounded-xl border border-emerald-200 space-y-3">
-              <div className="text-xs font-bold text-emerald-900 uppercase">Nghiệp vụ Ký gửi Bán</div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Giá bán (VNĐ) *</label>
-                  <input
-                    type="number"
-                    value={formData.salePrice || ''}
-                    onChange={(e) => setFormData({ ...formData, salePrice: Number(e.target.value) })}
-                    className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 font-bold focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Phí hoa hồng bán (%)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={formData.commissionRateSale || ''}
-                    onChange={(e) => setFormData({ ...formData, commissionRateSale: Number(e.target.value) })}
-                    className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Thương lượng giá</label>
-                  <select
-                    value={formData.isNegotiable ? 'yes' : 'no'}
-                    onChange={(e) => setFormData({ ...formData, isNegotiable: e.target.value === 'yes' })}
-                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
-                  >
-                    <option value="yes">Có bớt lộc / thương lượng</option>
-                    <option value="no">Giá chốt cứng</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* If RENT or SALE_AND_RENT */}
-          {(formData.transactionType === 'RENT' || formData.transactionType === 'SALE_AND_RENT') && (
-            <div className="p-4 bg-blue-50/60 rounded-xl border border-blue-200 space-y-3">
-              <div className="text-xs font-bold text-blue-900 uppercase">Nghiệp vụ Ký gửi Cho thuê</div>
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Giá thuê / tháng (VNĐ) *</label>
-                  <input
-                    type="number"
-                    value={formData.rentPriceMonthly || ''}
-                    onChange={(e) => setFormData({ ...formData, rentPriceMonthly: Number(e.target.value) })}
-                    className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 font-bold focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Tiền cọc (Số tháng)</label>
-                  <input
-                    type="number"
-                    value={formData.depositMonths || ''}
-                    onChange={(e) => setFormData({ ...formData, depositMonths: Number(e.target.value) })}
-                    className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Thời hạn thuê tối thiểu (tháng)</label>
-                  <input
-                    type="number"
-                    value={formData.minLeaseTermMonths || ''}
-                    onChange={(e) => setFormData({ ...formData, minLeaseTermMonths: Number(e.target.value) })}
-                    className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Hoa hồng thuê (tháng)</label>
-                  <input
-                    type="number"
-                    step="0.5"
-                    value={formData.commissionRateRentMonths || ''}
-                    onChange={(e) => setFormData({ ...formData, commissionRateRentMonths: Number(e.target.value) })}
-                    className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* If TRANSFER */}
-          {formData.transactionType === 'TRANSFER' && (
-            <div className="p-4 bg-amber-50/60 rounded-xl border border-amber-200 space-y-3">
-              <div className="text-xs font-bold text-amber-900 uppercase">Nghiệp vụ Sang nhượng mặt bằng</div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Giá sang nhượng toàn bộ (VNĐ) *</label>
-                  <input
-                    type="number"
-                    value={formData.transferPrice || ''}
-                    onChange={(e) => setFormData({ ...formData, transferPrice: Number(e.target.value) })}
-                    className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 font-bold focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Doanh thu ước tính / tháng</label>
-                  <input
-                    type="number"
-                    value={formData.monthlyRevenueEstimate || ''}
-                    onChange={(e) => setFormData({ ...formData, monthlyRevenueEstimate: Number(e.target.value) })}
-                    className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Lợi nhuận ước tính / tháng</label>
-                  <input
-                    type="number"
-                    value={formData.monthlyProfitEstimate || ''}
-                    onChange={(e) => setFormData({ ...formData, monthlyProfitEstimate: Number(e.target.value) })}
-                    className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Danh mục cơ sở vật chất sang lại</label>
-                <textarea
-                  rows={2}
-                  placeholder="VD: Để lại toàn bộ bàn ghế gỗ, hệ thống máy lạnh Daikin, máy pha cà phê Faema..."
-                  value={formData.transferInventoryDetails}
-                  onChange={(e) => setFormData({ ...formData, transferInventoryDetails: e.target.value })}
-                  className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
-                />
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* SECTION 5: Legal & Cadastral (Chống trùng lặp) */}
+        {/* SECTION 4: Legal & Permits */}
         <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
           <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2 border-b border-slate-100 pb-3">
             <FileCheck className="w-4 h-4 text-amber-600" />
-            5. Pháp lý & Thông số địa chính (Số thửa & Số tờ bản đồ)
+            4. Pháp lý & Quy hoạch
           </h2>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Tình trạng pháp lý</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Loại giấy tờ pháp lý *</label>
               <select
                 value={formData.legalType}
-                onChange={(e) => setFormData({ ...formData, legalType: e.target.value as LegalType })}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-amber-500"
+                onChange={(e) => setFormData({ ...formData, legalType: e.target.value as any })}
+                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-amber-500"
               >
                 {LEGAL_TYPES.map((l) => (
-                  <option key={l} value={l}>
-                    {l}
-                  </option>
+                  <option key={l} value={l}>{l}</option>
                 ))}
               </select>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Số thửa đất (Hỗ trợ phát hiện trùng)
-              </label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Số thửa đất (Tránh trùng hàng)</label>
               <input
                 type="text"
                 placeholder="VD: 142"
@@ -828,37 +924,24 @@ export const PropertyForm: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Số tờ bản đồ (Hỗ trợ phát hiện trùng)
-              </label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Số tờ bản đồ</label>
               <input
                 type="text"
-                placeholder="VD: 28"
+                placeholder="VD: 36"
                 value={formData.cadastralSheetNumber}
                 onChange={(e) => setFormData({ ...formData, cadastralSheetNumber: e.target.value })}
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500 font-mono"
               />
             </div>
           </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Thông tin quy hoạch & xây dựng</label>
-            <input
-              type="text"
-              placeholder="VD: Đất ở đô thị hiện hữu không quy hoạch lộ giới, được phép xây cao 6 tầng"
-              value={formData.planningStatus}
-              onChange={(e) => setFormData({ ...formData, planningStatus: e.target.value })}
-              className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
-            />
-          </div>
         </div>
 
-        {/* SECTION 6: Confidential Owner Info */}
+        {/* SECTION 5: Confidential Owner Info */}
         <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
               <Phone className="w-4 h-4 text-amber-600" />
-              6. Thông tin chủ bất động sản (Bảo mật nội bộ)
+              5. Thông tin chủ bất động sản (Bảo mật nội bộ)
             </h2>
             <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100">
               🔒 Phân quyền bảo mật
@@ -899,230 +982,360 @@ export const PropertyForm: React.FC = () => {
               />
             </div>
           </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Mối quan hệ với bất động sản</label>
-              <input
-                type="text"
-                placeholder="VD: Đứng tên trên sổ, Con trai chủ nhà, Quản lý tòa nhà..."
-                value={formData.ownerRelationship}
-                onChange={(e) => setFormData({ ...formData, ownerRelationship: e.target.value })}
-                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Lưu ý khi liên hệ chủ nhà</label>
-              <input
-                type="text"
-                placeholder="VD: Báo trước 1 tiếng, không nhắc giá trước mặt người thuê..."
-                value={formData.ownerContactNote}
-                onChange={(e) => setFormData({ ...formData, ownerContactNote: e.target.value })}
-                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
-              />
-            </div>
-          </div>
         </div>
 
-        {/* SECTION 7: Smart Image Upload & Compression */}
+        {/* SECTION 6: Complete Image Management with Firebase Storage */}
         <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
             <div>
-              <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <ImageIcon className="w-4 h-4 text-amber-600" />
-                7. Hình ảnh & Sổ hồng thực tế
-              </h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                  <ImageIcon className="w-4 h-4 text-amber-600" />
+                  6. Quản lý hình ảnh & Sổ hồng thực tế
+                </h2>
+                <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+                  {stagedImages.length} / 20 ảnh
+                </span>
+              </div>
               <p className="text-[11px] text-slate-500 mt-0.5">
-                Tự động nén ảnh chất lượng cao để tải nhanh trên điện thoại.
+                Hệ thống nén ảnh trực tiếp trên trình duyệt, lưu trữ bảo mật trên Firebase Storage.
               </p>
             </div>
 
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isUploading}
-              className="flex items-center gap-2 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold shadow-xs transition-colors"
-            >
-              <Upload className="w-3.5 h-3.5" />
-              <span>{isUploading ? 'Đang nén ảnh...' : 'Chọn ảnh tải lên'}</span>
-            </button>
+            <div className="flex items-center gap-2">
+              {failedCount > 0 && (
+                <button
+                  type="button"
+                  onClick={handleRetryFailedImages}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-rose-50 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold hover:bg-rose-100 transition-colors"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Thử lại {failedCount} ảnh lỗi</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading || stagedImages.length >= 20}
+                className="flex items-center gap-2 px-3.5 py-2 bg-[#001f3f] hover:bg-[#002e5c] text-white rounded-xl text-xs font-bold shadow-xs transition-colors disabled:opacity-50"
+              >
+                <Upload className="w-3.5 h-3.5 text-[#D4AF37]" />
+                <span>Chọn ảnh tải lên</span>
+              </button>
+            </div>
           </div>
 
           <input
             type="file"
             ref={fileInputRef}
             multiple
-            accept="image/*"
-            onChange={(e) => handleImageFiles(e.target.files)}
+            accept="image/jpeg,image/png,image/webp"
+            onChange={(e) => handleSelectFiles(e.target.files)}
             className="hidden"
           />
 
-          {/* Upload Dropzone / Gallery */}
-          {(!formData.images || formData.images.length === 0) && !isUploading ? (
+          {/* Drag and Drop Zone */}
+          {stagedImages.length === 0 ? (
             <div
               onClick={() => fileInputRef.current?.click()}
-              className="p-8 border-2 border-dashed border-slate-200 hover:border-amber-400 rounded-2xl text-center cursor-pointer transition-colors bg-slate-50/50"
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDragOver(true);
+              }}
+              onDragLeave={() => setIsDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDragOver(false);
+                if (e.dataTransfer.files) handleSelectFiles(e.dataTransfer.files);
+              }}
+              className={`p-8 border-2 border-dashed rounded-2xl text-center cursor-pointer transition-all ${
+                isDragOver
+                  ? 'border-amber-500 bg-amber-50/50 scale-[0.99]'
+                  : 'border-slate-300 hover:border-amber-400 bg-slate-50/50'
+              }`}
             >
-              <div className="w-12 h-12 bg-amber-100 text-amber-700 rounded-2xl flex items-center justify-center mx-auto mb-2">
+              <div className="w-12 h-12 bg-amber-100 text-amber-800 rounded-2xl flex items-center justify-center mx-auto mb-2">
                 <Upload className="w-6 h-6" />
               </div>
-              <p className="text-xs font-bold text-slate-800">Chạm hoặc kéo thả ảnh vào đây</p>
-              <p className="text-[11px] text-slate-500 mt-1">Hỗ trợ PNG, JPG, JPEG. Chụp trực tiếp từ điện thoại.</p>
+              <p className="text-xs font-bold text-slate-800">
+                Chạm hoặc kéo thả hình ảnh bất động sản vào đây
+              </p>
+              <p className="text-[11px] text-slate-500 mt-1">
+                Hỗ trợ định dạng JPG, JPEG, PNG, WEBP (Tối đa 10 MB/ảnh, tối đa 20 ảnh).
+              </p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-3">
-              {formData.images?.map((url, idx) => {
-                const isCover = formData.coverImage === url;
-                return (
-                  <div
-                    key={idx}
-                    className={`group relative rounded-xl overflow-hidden border-2 aspect-square bg-slate-100 ${
-                      isCover ? 'border-amber-500 ring-2 ring-amber-500/20' : 'border-slate-200'
-                    }`}
-                  >
-                    <img
-                      src={url}
-                      alt={`Ảnh ${idx + 1}`}
-                      referrerPolicy="no-referrer"
-                      className="w-full h-full object-cover"
-                    />
+            <div className="space-y-3">
+              {/* Image Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                {stagedImages.map((staged, idx) => {
+                  return (
+                    <div
+                      key={staged.id}
+                      className={`group relative rounded-xl overflow-hidden border-2 flex flex-col bg-slate-900/5 transition-all ${
+                        staged.isCover
+                          ? 'border-amber-500 ring-2 ring-amber-500/20 shadow-xs'
+                          : staged.status === 'error'
+                          ? 'border-rose-500 bg-rose-50/20'
+                          : 'border-slate-200'
+                      }`}
+                    >
+                      {/* Image Thumbnail Container */}
+                      <div className="relative aspect-square bg-slate-900/10 overflow-hidden flex items-center justify-center">
+                        <img
+                          src={staged.previewUrl}
+                          alt={staged.fileName}
+                          referrerPolicy="no-referrer"
+                          className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                        />
 
-                    {/* Cover badge */}
-                    {isCover && (
-                      <div className="absolute top-1.5 left-1.5 bg-amber-500 text-slate-950 text-[10px] font-extrabold px-1.5 py-0.5 rounded shadow-xs">
-                        Ảnh bìa
+                        {/* Top Badges */}
+                        <div className="absolute top-1.5 left-1.5 right-1.5 flex items-center justify-between pointer-events-none">
+                          {staged.isCover ? (
+                            <span className="bg-amber-500 text-slate-950 text-[10px] font-black px-1.5 py-0.5 rounded shadow-xs">
+                              Ảnh bìa
+                            </span>
+                          ) : (
+                            <span className="bg-slate-900/70 text-white text-[10px] font-bold px-1.5 py-0.5 rounded backdrop-blur-xs">
+                              #{idx + 1}
+                            </span>
+                          )}
+
+                          {staged.status === 'success' && (
+                            <span className="bg-emerald-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow-xs flex items-center gap-0.5">
+                              <CheckCircle2 className="w-2.5 h-2.5" /> Đã lưu
+                            </span>
+                          )}
+                          {staged.status === 'pending' && (
+                            <span className="bg-slate-800/80 text-white text-[9px] font-medium px-1.5 py-0.5 rounded">
+                              Chờ lưu
+                            </span>
+                          )}
+                          {staged.status === 'error' && (
+                            <span className="bg-rose-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow-xs flex items-center gap-0.5">
+                              <XCircle className="w-2.5 h-2.5" /> Lỗi
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Uploading Progress Overlay */}
+                        {staged.status === 'uploading' && (
+                          <div className="absolute inset-0 bg-slate-950/70 flex flex-col items-center justify-center p-2 text-white text-center">
+                            <RefreshCw className="w-5 h-5 animate-spin text-amber-400 mb-1" />
+                            <span className="text-[11px] font-bold">{staged.progress}%</span>
+                            <div className="w-full bg-slate-700 h-1.5 rounded-full overflow-hidden mt-1">
+                              <div
+                                className="bg-amber-400 h-full transition-all duration-200"
+                                style={{ width: `${staged.progress}%` }}
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Hover Quick Actions */}
+                        <div className="absolute inset-0 bg-slate-950/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5 p-1">
+                          {/* Set Cover Button */}
+                          {!staged.isCover && (
+                            <button
+                              type="button"
+                              onClick={() => handleSetCover(staged.id)}
+                              className="p-1.5 bg-amber-400 hover:bg-amber-500 text-slate-950 rounded-lg text-xs font-bold transition-transform hover:scale-105"
+                              title="Đặt làm ảnh bìa đại diện"
+                            >
+                              <Star className="w-3.5 h-3.5 fill-current" />
+                            </button>
+                          )}
+
+                          {/* Reorder Arrows */}
+                          {idx > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => handleMoveImage(idx, 'left')}
+                              className="p-1.5 bg-white/90 hover:bg-white text-slate-900 rounded-lg text-xs transition-transform hover:scale-105"
+                              title="Di chuyển sang trái"
+                            >
+                              <ChevronLeft className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+
+                          {idx < stagedImages.length - 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleMoveImage(idx, 'right')}
+                              className="p-1.5 bg-white/90 hover:bg-white text-slate-900 rounded-lg text-xs transition-transform hover:scale-105"
+                              title="Di chuyển sang phải"
+                            >
+                              <ChevronRight className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+
+                          {/* Remove Button */}
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveImage(staged.id)}
+                            disabled={isUploading}
+                            className="p-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs transition-transform hover:scale-105"
+                            title="Xóa ảnh khỏi danh sách"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
-                    )}
 
-                    {/* Actions overlay */}
-                    <div className="absolute inset-0 bg-slate-950/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                      {!isCover && (
-                        <button
-                          type="button"
-                          onClick={() => handleSetCover(url)}
-                          className="p-1.5 bg-white text-slate-900 rounded-lg hover:bg-amber-400 text-xs"
-                          title="Đặt làm ảnh đại diện"
-                        >
-                          <Star className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveImage(idx)}
-                        className="p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 text-xs"
-                        title="Xóa ảnh"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      {/* File Details Footer */}
+                      <div className="p-2 text-[10px] text-slate-600 bg-white flex flex-col justify-between flex-1 border-t border-slate-100">
+                        <span className="font-semibold text-slate-800 truncate" title={staged.fileName}>
+                          {staged.fileName}
+                        </span>
+                        <div className="flex items-center justify-between text-[9px] text-slate-400 mt-0.5">
+                          <span>{formatFileSize(staged.originalSize)}</span>
+                          {staged.compressedSize && staged.compressedSize < staged.originalSize && (
+                            <span className="text-emerald-600 font-medium">
+                              (Nén: {formatFileSize(staged.compressedSize)})
+                            </span>
+                          )}
+                        </div>
+                        {staged.errorMessage && (
+                          <span className="text-rose-600 text-[9px] font-semibold truncate mt-0.5">
+                            {staged.errorMessage}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
 
-              {/* Add more button */}
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="rounded-xl border-2 border-dashed border-slate-300 hover:border-amber-500 flex flex-col items-center justify-center aspect-square text-slate-400 hover:text-slate-700 transition-colors bg-slate-50/50"
-              >
-                <Upload className="w-5 h-5 mb-1" />
-                <span className="text-[11px] font-semibold">Thêm ảnh</span>
-              </button>
+                {/* Add More Slot */}
+                {stagedImages.length < 20 && (
+                  <div
+                    onClick={() => fileInputRef.current?.click()}
+                    className="rounded-xl border-2 border-dashed border-slate-300 hover:border-amber-500 flex flex-col items-center justify-center aspect-square text-slate-400 hover:text-slate-700 transition-colors bg-slate-50/50 cursor-pointer p-3 text-center"
+                  >
+                    <Upload className="w-5 h-5 mb-1 text-slate-500" />
+                    <span className="text-[11px] font-bold text-slate-700">Thêm ảnh khác</span>
+                    <span className="text-[9px] text-slate-400 mt-0.5">Tối đa 20 ảnh</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Summary note */}
+              <div className="flex items-center justify-between text-[11px] text-slate-500 px-1 pt-1">
+                <span>
+                  💡 <strong>Mẹo:</strong> Rê chuột lên từng ảnh để chọn làm <em>Ảnh bìa</em> hoặc đổi thứ tự sắp xếp.
+                </span>
+                {pendingCount > 0 && (
+                  <span className="text-amber-700 font-medium">
+                    Có {pendingCount} ảnh mới sẽ được tải lên khi bạn bấm nút Lưu.
+                  </span>
+                )}
+              </div>
             </div>
           )}
         </div>
 
-        {/* SECTION 8: Assignment & Internal Notes */}
+        {/* SECTION 7: Assignment & Sharing */}
         <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
           <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2 border-b border-slate-100 pb-3">
             <Sparkles className="w-4 h-4 text-amber-600" />
-            8. Phân công môi giới & Ghi chú nội bộ
+            7. Phân công phụ trách & Ghi chú nội bộ
           </h2>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Môi giới phụ trách trực tiếp</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Môi giới phụ trách *</label>
               <select
                 value={formData.assignedAgentId}
-                onChange={(e) => {
-                  const agent = users.find((u) => u.id === e.target.value);
-                  setFormData({
-                    ...formData,
-                    assignedAgentId: e.target.value,
-                    teamId: agent?.teamId || formData.teamId,
-                  });
-                }}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-amber-500"
+                onChange={(e) => setFormData({ ...formData, assignedAgentId: e.target.value })}
+                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-amber-500"
               >
                 {users.map((u) => (
                   <option key={u.id} value={u.id}>
-                    {u.fullName} ({u.employeeCode}) - {u.role === 'ADMIN' ? 'Admin' : u.role === 'TEAM_LEADER' ? 'Trưởng nhóm' : 'Môi giới'}
+                    {u.fullName} ({u.employeeCode || u.role})
                   </option>
                 ))}
               </select>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Thuộc Đội nhóm / Phòng ban</label>
-              <select
-                value={formData.teamId}
-                onChange={(e) => setFormData({ ...formData, teamId: e.target.value })}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-amber-500"
-              >
-                {teams.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name} ({t.leaderName || 'Trưởng nhóm'})
-                  </option>
-                ))}
-              </select>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Vị trí lưu chìa khóa</label>
+              <input
+                type="text"
+                placeholder="VD: Gửi ban quản lý tòa nhà, gửi tại văn phòng..."
+                value={formData.keysLocation}
+                onChange={(e) => setFormData({ ...formData, keysLocation: e.target.value })}
+                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
+              />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Ghi chú nội bộ bí mật</label>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">Ghi chú mật cho đội ngũ nội bộ</label>
             <textarea
               rows={2}
-              placeholder="Ghi chú thêm về tâm lý chủ nhà, hoa hồng thực nhận, nguồn khách tiềm năng..."
+              placeholder="VD: Chủ nhà cần tiền gấp, sẵn sàng bớt thêm 200tr cho khách thiện chí cọc trong tuần..."
               value={formData.internalNotes}
               onChange={(e) => setFormData({ ...formData, internalNotes: e.target.value })}
-              className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
+              className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500 resize-none"
             />
           </div>
         </div>
       </div>
 
-      {/* Bottom Floating Actions */}
-      <div className="sticky bottom-4 z-20 bg-white/95 backdrop-blur-md p-4 rounded-2xl border border-slate-200 shadow-xl flex items-center justify-between gap-4">
-        <button
-          type="button"
-          onClick={() => navigate('/properties')}
-          className="px-4 py-2.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
-        >
-          Hủy bỏ
-        </button>
+      {/* Bottom Floating Action Bar */}
+      <div className="sticky bottom-4 z-20 bg-white/90 backdrop-blur-md p-4 rounded-2xl border border-slate-200 shadow-lg flex items-center justify-between gap-4">
+        <div className="flex items-center gap-2 text-xs text-slate-600">
+          <span className="font-semibold text-slate-900">
+            {isEditMode ? `Đang sửa: ${formData.code || 'BĐS'}` : 'Nguồn hàng mới'}
+          </span>
+          <span>•</span>
+          <span>{stagedImages.length} ảnh đã chọn</span>
+          {failedCount > 0 && <span className="text-rose-600 font-bold">({failedCount} ảnh lỗi)</span>}
+        </div>
 
-        <button
-          type="button"
-          onClick={() => handleSave(false)}
-          className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-bold text-xs rounded-xl shadow-md shadow-amber-500/20 transition-all active:scale-98"
-        >
-          <Save className="w-4 h-4" />
-          <span>{isEditMode ? 'Lưu thay đổi' : 'Tạo mới nguồn hàng'}</span>
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => navigate('/properties')}
+            className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900"
+          >
+            Hủy
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleSave(false)}
+            disabled={isUploading}
+            className="flex items-center gap-2 px-6 py-2.5 bg-[#001f3f] hover:bg-[#002e5c] text-white rounded-xl text-xs font-bold shadow-md shadow-slate-900/10 transition-all disabled:opacity-50"
+          >
+            {isUploading ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin text-[#D4AF37]" />
+                <span>{uploadStatusText || 'Đang xử lý...'}</span>
+              </>
+            ) : (
+              <>
+                <Save className="w-4 h-4 text-[#D4AF37]" />
+                <span>{isEditMode ? 'Lưu thay đổi' : 'Tạo mới nguồn hàng'}</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
-      {/* Duplicate Warning Modal */}
-      <DuplicateWarningModal
-        isOpen={duplicateWarning.isOpen}
-        onClose={() => setDuplicateWarning((prev) => ({ ...prev, isOpen: false }))}
-        onProceed={() => {
-          setDuplicateWarning((prev) => ({ ...prev, isOpen: false }));
-          handleSave(true);
-        }}
-        reasons={duplicateWarning.reasons}
-        matchedProperties={duplicateWarning.matchedProperties}
-      />
+      {/* Duplicate Property Warning Modal */}
+      {duplicateWarning.isOpen && (
+        <DuplicateWarningModal
+          isOpen={duplicateWarning.isOpen}
+          reasons={duplicateWarning.reasons}
+          matchedProperties={duplicateWarning.matchedProperties}
+          onClose={() => setDuplicateWarning({ isOpen: false, reasons: [], matchedProperties: [] })}
+          onProceed={() => {
+            setDuplicateWarning({ isOpen: false, reasons: [], matchedProperties: [] });
+            handleSave(true);
+          }}
+        />
+      )}
     </div>
   );
 };
