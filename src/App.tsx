@@ -34,13 +34,13 @@ export default function App() {
                   <Route path="/trash" element={<TrashList />} />
                   <Route path="/settings" element={<Settings />} />
 
-                  {/* Future Phase Placeholders */}
+                  {/* Operational Modules */}
                   <Route
                     path="/customers"
                     element={
                       <PlaceholderModule
                         title="Quản lý Khách hàng (CRM)"
-                        phase="Giai đoạn 2"
+                        phase="Quản trị Khách hàng (CRM)"
                         description="Hệ thống quản lý thông tin khách mua, khách thuê, nhu cầu chi tiết, phân loại nhóm khách hàng và lịch sử tương tác."
                         features={[
                           'Quản lý danh sách khách mua / khách thuê',
@@ -56,7 +56,7 @@ export default function App() {
                     element={
                       <PlaceholderModule
                         title="Thuật toán Ghép nguồn hàng & Khách hàng"
-                        phase="Giai đoạn 2"
+                        phase="Khớp nhu cầu tự động"
                         description="Hệ thống tự động so khớp các tiêu chí giữa nguồn hàng ký gửi và nhu cầu khách hàng theo tỷ lệ phần trăm tương đồng."
                         features={[
                           'Thuật toán so khớp đa chiều (Khu vực, Khoảng giá, Loại hình, Diện tích)',
@@ -72,7 +72,7 @@ export default function App() {
                     element={
                       <PlaceholderModule
                         title="Lịch hẹn & Dẫn khách xem BĐS"
-                        phase="Giai đoạn 2"
+                        phase="Quản lý Lịch hẹn & Khảo sát"
                         description="Theo dõi và quản lý lịch dẫn khách đi xem nhà thực tế, ghi nhận phản hồi và đánh giá sau buổi khảo sát."
                         features={[
                           'Lên lịch hẹn xem nhà và nhắc nhở thời gian',
@@ -88,7 +88,7 @@ export default function App() {
                     element={
                       <PlaceholderModule
                         title="Quy trình Giao dịch Mua bán & Sang nhượng"
-                        phase="Giai đoạn 3"
+                        phase="Giao dịch Mua Bán"
                         description="Theo dõi toàn bộ quy trình từ đặt cọc, chuẩn bị hồ sơ công chứng, thanh toán và bàn giao tài sản."
                         features={[
                           'Quản lý phiếu đặt cọc và điều khoản thanh toán',
@@ -104,7 +104,7 @@ export default function App() {
                     element={
                       <PlaceholderModule
                         title="Nghiệp vụ Cho thuê BĐS"
-                        phase="Giai đoạn 3"
+                        phase="Nghiệp vụ Cho Thuê"
                         description="Quản lý quy trình đặt cọc giữ chỗ thuê, hợp đồng nguyên tắc và bàn giao mặt bằng."
                         features={[
                           'Phiếu cọc giữ chỗ thuê nhà/mặt bằng',
@@ -120,7 +120,7 @@ export default function App() {
                     element={
                       <PlaceholderModule
                         title="Quản lý Hợp đồng thuê & Nhắc hạn"
-                        phase="Giai đoạn 3"
+                        phase="Quản trị Hợp đồng"
                         description="Theo dõi hạn hợp đồng thuê, quản lý kỳ thanh toán định kỳ và tự động nhắc nhở trước khi hết hạn."
                         features={[
                           'Theo dõi thời hạn hợp đồng thuê và ngày đến hạn',
@@ -136,7 +136,7 @@ export default function App() {
                     element={
                       <PlaceholderModule
                         title="Quản lý Phí hoa hồng & Doanh thu"
-                        phase="Giai đoạn 3"
+                        phase="Tài chính & Hoa hồng"
                         description="Tính toán và phân chia tỷ lệ hoa hồng cho công ty, trưởng nhóm, người lấy nguồn và người bán hàng."
                         features={[
                           'Ghi nhận tổng phí hoa hồng từ giao dịch thành công',
@@ -152,7 +152,7 @@ export default function App() {
                     element={
                       <PlaceholderModule
                         title="Báo cáo & Phân tích Doanh số"
-                        phase="Giai đoạn 4"
+                        phase="Báo cáo & Phân tích"
                         description="Tổng hợp biểu đồ phân tích hiệu suất kinh doanh, doanh thu hoa hồng theo tháng, quý và xếp hạng môi giới xuất sắc."
                         features={[
                           'Biểu đồ doanh số và số lượng giao dịch theo thời gian',
@@ -168,7 +168,7 @@ export default function App() {
                     element={
                       <PlaceholderModule
                         title="Nhật ký hoạt động hệ thống (Audit Logs)"
-                        phase="Giai đoạn 4"
+                        phase="Bảo mật & Giám sát"
                         description="Ghi lại toàn bộ lịch sử thao tác thêm, sửa, xóa, đổi trạng thái và xem số điện thoại bảo mật của người dùng."
                         features={[
                           'Nhật ký thao tác chi tiết theo thời gian thực',

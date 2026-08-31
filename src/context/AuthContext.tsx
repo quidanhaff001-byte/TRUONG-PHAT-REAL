@@ -33,8 +33,22 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    try {
+      const savedUser = localStorage.getItem('tp_current_user');
+      return savedUser ? JSON.parse(savedUser) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [isLoading, setIsLoading] = useState<boolean>(() => {
+    // If we already have a saved user session in localStorage, we can start non-blocking
+    try {
+      return !localStorage.getItem('tp_current_user') && isFirebaseConfigured;
+    } catch {
+      return true;
+    }
+  });
   const [isFirebaseActive, setIsFirebaseActive] = useState<boolean>(isFirebaseConfigured);
   const { success, error, info } = useToast();
 
@@ -48,7 +62,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             const userSnap = await getDoc(userDocRef);
 
             if (userSnap.exists()) {
-              setCurrentUser(userSnap.data() as User);
+              const userData = userSnap.data() as User;
+              setCurrentUser(userData);
+              localStorage.setItem('tp_current_user', JSON.stringify(userData));
             } else {
               // Create user document in Firestore on first login
               const isDefaultAdmin = fbUser.email === 'quidanh.aff001@gmail.com' || fbUser.email?.includes('admin');
@@ -66,6 +82,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               };
               await setDoc(userDocRef, newUser, { merge: true });
               setCurrentUser(newUser);
+              localStorage.setItem('tp_current_user', JSON.stringify(newUser));
             }
           } catch (err) {
             console.error('Error fetching Firestore user profile:', err);
@@ -81,6 +98,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               createdAt: new Date().toISOString(),
             };
             setCurrentUser(fallbackUser);
+            localStorage.setItem('tp_current_user', JSON.stringify(fallbackUser));
           }
         } else {
           // If no active Firebase auth session and no saved local session, keep logged out

@@ -30,20 +30,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
 
   // Define menu items with permission requirements
   const allMenuItems = [
-    { label: 'Tổng quan', path: '/', icon: LayoutDashboard, badge: null, visible: true },
-    { label: 'Nguồn hàng', path: '/properties', icon: Building, badge: 'Phase 1', visible: true },
-    { label: 'Khách hàng', path: '/customers', icon: Users2, badge: 'Phase 2', visible: true },
-    { label: 'Ghép sản phẩm', path: '/match', icon: Sparkles, badge: 'Phase 2', visible: true },
-    { label: 'Lịch hẹn', path: '/appointments', icon: CalendarDays, badge: 'Phase 2', visible: true },
-    { label: 'Bán & Sang nhượng', path: '/sales', icon: BadgePercent, badge: 'Phase 3', visible: true },
-    { label: 'Cho thuê', path: '/rentals', icon: KeyRound, badge: 'Phase 3', visible: true },
-    { label: 'Hợp đồng thuê', path: '/contracts', icon: FileText, badge: 'Phase 3', visible: isTeamLeader },
-    { label: 'Hoa hồng', path: '/commissions', icon: DollarSign, badge: 'Phase 3', visible: isTeamLeader },
-    { label: 'Nhân sự & Nhóm', path: '/users', icon: UserCog, badge: 'Phase 1', visible: isTeamLeader },
-    { label: 'Báo cáo', path: '/reports', icon: BarChart3, badge: 'Phase 4', visible: isTeamLeader },
-    { label: 'Nhật ký hoạt động', path: '/audit-logs', icon: History, badge: 'Phase 4', visible: isAdmin },
-    { label: 'Thùng rác', path: '/trash', icon: Trash2, badge: 'Phase 4', visible: isAdmin },
-    { label: 'Cài đặt hệ thống', path: '/settings', icon: Settings, badge: null, visible: isAdmin },
+    { label: 'Tổng quan', path: '/', icon: LayoutDashboard, visible: true },
+    { label: 'Nguồn hàng', path: '/properties', icon: Building, visible: true },
+    { label: 'Khách hàng', path: '/customers', icon: Users2, visible: true },
+    { label: 'Ghép sản phẩm', path: '/match', icon: Sparkles, visible: true },
+    { label: 'Lịch hẹn', path: '/appointments', icon: CalendarDays, visible: true },
+    { label: 'Bán & Sang nhượng', path: '/sales', icon: BadgePercent, visible: true },
+    { label: 'Cho thuê', path: '/rentals', icon: KeyRound, visible: true },
+    { label: 'Hợp đồng thuê', path: '/contracts', icon: FileText, visible: isTeamLeader },
+    { label: 'Hoa hồng', path: '/commissions', icon: DollarSign, visible: isTeamLeader },
+    { label: 'Nhân sự & Nhóm', path: '/users', icon: UserCog, visible: isTeamLeader },
+    { label: 'Báo cáo', path: '/reports', icon: BarChart3, visible: isTeamLeader },
+    { label: 'Nhật ký hoạt động', path: '/audit-logs', icon: History, visible: isAdmin },
+    { label: 'Thùng rác', path: '/trash', icon: Trash2, visible: isAdmin },
+    { label: 'Cài đặt hệ thống', path: '/settings', icon: Settings, visible: isAdmin },
   ];
 
   const menuItems = allMenuItems.filter((item) => item.visible);
@@ -140,25 +140,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
                 }
               >
                 {({ isActive }) => (
-                  <>
-                    <div className="flex items-center gap-3">
-                      <Icon className={`w-4 h-4 ${isActive ? 'text-[#D4AF37]' : 'text-gray-400'}`} />
-                      <span>{item.label}</span>
-                    </div>
-                    {item.badge && (
-                      <span
-                        className={`text-[9px] px-1.5 py-0.5 rounded font-mono font-semibold ${
-                          isActive
-                            ? 'bg-[#D4AF37]/20 text-[#D4AF37]'
-                            : item.badge === 'Phase 1'
-                            ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-800/40'
-                            : 'bg-white/10 text-gray-400'
-                        }`}
-                      >
-                        {item.badge}
-                      </span>
-                    )}
-                  </>
+                  <div className="flex items-center gap-3">
+                    <Icon className={`w-4 h-4 ${isActive ? 'text-[#D4AF37]' : 'text-gray-400'}`} />
+                    <span>{item.label}</span>
+                  </div>
                 )}
               </NavLink>
             );

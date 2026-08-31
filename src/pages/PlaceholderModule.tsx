@@ -4,14 +4,14 @@ import { Sparkles, ArrowRight, Building, CheckCircle2 } from 'lucide-react';
 
 interface PlaceholderModuleProps {
   title: string;
-  phase: string;
+  phase?: string;
   description: string;
   features: string[];
 }
 
 export const PlaceholderModule: React.FC<PlaceholderModuleProps> = ({
   title,
-  phase,
+  phase = 'Phân hệ nghiệp vụ',
   description,
   features,
 }) => {
@@ -21,10 +21,10 @@ export const PlaceholderModule: React.FC<PlaceholderModuleProps> = ({
     <div className="space-y-6 max-w-4xl mx-auto py-6">
       <div className="bg-white rounded-3xl p-8 border border-slate-200 shadow-xs space-y-6">
         <div className="flex items-center gap-3">
-          <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-200">
+          <span className="px-3 py-1 rounded-full text-xs font-bold bg-[#D4AF37]/15 text-[#001f3f] border border-[#D4AF37]/30">
             {phase}
           </span>
-          <span className="text-xs text-slate-400">Đã hoàn thành cấu trúc dữ liệu & TypeScript Schema</span>
+          <span className="text-xs text-slate-400">Đã sẵn sàng cấu trúc dữ liệu & TypeScript Schema</span>
         </div>
 
         <div>
