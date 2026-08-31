@@ -1,6 +1,11 @@
 import { TransactionType } from '../types';
 
 /**
+ * Vietnam Timezone Constant
+ */
+export const VIETNAM_TIMEZONE = 'Asia/Ho_Chi_Minh';
+
+/**
  * Format currency to short Vietnamese readable text (Tỷ, Triệu, Ngàn VNĐ)
  */
 export function formatVND(amount?: number | null): string {
@@ -9,7 +14,6 @@ export function formatVND(amount?: number | null): string {
 
   if (amount >= 1_000_000_000) {
     const ty = amount / 1_000_000_000;
-    // If exact integer or clean decimal
     const formatted = ty % 1 === 0 ? ty.toString() : ty.toFixed(2).replace(/\.?0+$/, '');
     return `${formatted} tỷ`;
   }
@@ -51,38 +55,144 @@ export function formatDimensions(width?: number | null, length?: number | null):
 }
 
 /**
- * Format date to dd/MM/yyyy
+ * Format date in Asia/Ho_Chi_Minh timezone to dd/MM/yyyy
  */
 export function formatDate(dateString?: string | null): string {
   if (!dateString) return '—';
   try {
     const d = new Date(dateString);
     if (isNaN(d.getTime())) return dateString;
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const year = d.getFullYear();
-    return `${day}/${month}/${year}`;
+    return new Intl.DateTimeFormat('vi-VN', {
+      timeZone: VIETNAM_TIMEZONE,
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    }).format(d);
   } catch {
     return dateString;
   }
 }
 
 /**
- * Format date & time to HH:mm dd/MM/yyyy
+ * Format date & time in Asia/Ho_Chi_Minh timezone to HH:mm dd/MM/yyyy
  */
 export function formatDateTime(dateString?: string | null): string {
   if (!dateString) return '—';
   try {
     const d = new Date(dateString);
     if (isNaN(d.getTime())) return dateString;
-    const hours = String(d.getHours()).padStart(2, '0');
-    const minutes = String(d.getMinutes()).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const year = d.getFullYear();
-    return `${hours}:${minutes} ${day}/${month}/${year}`;
+    return new Intl.DateTimeFormat('vi-VN', {
+      timeZone: VIETNAM_TIMEZONE,
+      hour: '2-digit',
+      minute: '2-digit',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour12: false,
+    }).format(d);
   } catch {
     return dateString;
+  }
+}
+
+export const formatDateVN = formatDateTime;
+
+/**
+ * Get date string in Asia/Ho_Chi_Minh timezone formatted as YYYY-MM-DD
+ */
+export function getVietnamDateString(date: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: VIETNAM_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
+/**
+ * Appointment Status Classification for Asia/Ho_Chi_Minh timezone
+ */
+export type AppointmentStatusClassification = 'TODAY' | 'UPCOMING' | 'OVERDUE' | 'NONE';
+
+export interface AppointmentAnalysis {
+  status: AppointmentStatusClassification;
+  label: string;
+  badgeClass: string;
+  isUpcomingOrToday: boolean;
+  formattedDateTime: string;
+}
+
+/**
+ * Classifies an appointment date relative to current time in Asia/Ho_Chi_Minh timezone
+ * - TODAY: Scheduled for today's calendar date
+ * - UPCOMING: Strictly in future calendar dates
+ * - OVERDUE: In the past (past calendar date) - Excluded from upcoming appointment counts
+ */
+export function classifyAppointment(appointmentIso?: string | null): AppointmentAnalysis {
+  if (!appointmentIso) {
+    return {
+      status: 'NONE',
+      label: 'Chưa đặt lịch',
+      badgeClass: 'text-slate-400',
+      isUpcomingOrToday: false,
+      formattedDateTime: '—',
+    };
+  }
+
+  try {
+    const aptDate = new Date(appointmentIso);
+    if (isNaN(aptDate.getTime())) {
+      return {
+        status: 'NONE',
+        label: 'Không hợp lệ',
+        badgeClass: 'text-slate-400',
+        isUpcomingOrToday: false,
+        formattedDateTime: appointmentIso,
+      };
+    }
+
+    const todayVN = getVietnamDateString(new Date());
+    const aptVN = getVietnamDateString(aptDate);
+    const formattedDateTime = formatDateTime(appointmentIso);
+
+    // If appointment is on today's calendar date in Vietnam
+    if (aptVN === todayVN) {
+      return {
+        status: 'TODAY',
+        label: 'Lịch hôm nay',
+        badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-300 font-bold',
+        isUpcomingOrToday: true,
+        formattedDateTime,
+      };
+    }
+
+    // If appointment is in future calendar dates
+    if (aptVN > todayVN) {
+      return {
+        status: 'UPCOMING',
+        label: 'Sắp tới',
+        badgeClass: 'bg-blue-100 text-blue-800 border-blue-300 font-semibold',
+        isUpcomingOrToday: true,
+        formattedDateTime,
+      };
+    }
+
+    // If appointment date was in past calendar dates
+    return {
+      status: 'OVERDUE',
+      label: 'Quá hạn / Đã qua',
+      badgeClass: 'bg-rose-100 text-rose-800 border-rose-300 font-medium',
+      isUpcomingOrToday: false,
+      formattedDateTime,
+    };
+  } catch {
+    return {
+      status: 'NONE',
+      label: 'Chưa đặt lịch',
+      badgeClass: 'text-slate-400',
+      isUpcomingOrToday: false,
+      formattedDateTime: '—',
+    };
   }
 }
 
@@ -100,20 +210,24 @@ export function maskPhone(phone?: string | null, canViewFull: boolean = false): 
 }
 
 export const maskPhoneNumber = maskPhone;
-export const formatDateVN = formatDateTime;
 
 /**
- * Format relative date (Hôm nay, Hôm qua, X ngày trước)
+ * Format relative date (Hôm nay, Hôm qua, X ngày trước) in Asia/Ho_Chi_Minh
  */
 export function formatRelativeDate(dateString?: string | null): string {
   if (!dateString) return '—';
   try {
     const d = new Date(dateString);
+    if (isNaN(d.getTime())) return dateString;
+    const todayVN = getVietnamDateString(new Date());
+    const targetVN = getVietnamDateString(d);
+
+    if (targetVN === todayVN) return 'Hôm nay';
+
     const now = new Date();
     const diffTime = Math.abs(now.getTime() - d.getTime());
     const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
 
-    if (diffDays === 0) return 'Hôm nay';
     if (diffDays === 1) return 'Hôm qua';
     if (diffDays < 30) return `${diffDays} ngày trước`;
     return formatDate(dateString);
@@ -140,3 +254,4 @@ export function generatePropertyCode(type: TransactionType, sequence: number): s
       return `BDS-${pad}`;
   }
 }
+

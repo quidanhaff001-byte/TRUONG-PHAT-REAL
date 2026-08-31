@@ -88,8 +88,8 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
   const [source, setSource] = useState('Khách hàng giới thiệu');
 
   const [demandType, setDemandType] = useState<'MUA' | 'THUE' | 'SANG_NHUONG'>('MUA');
-  const [propertyTypes, setPropertyTypes] = useState<PropertyCategory[]>(['Nhà phố']);
-  const [areas, setAreas] = useState<string[]>(['Quận 1', 'Quận 2']);
+  const [propertyTypes, setPropertyTypes] = useState<PropertyCategory[]>([]);
+  const [areas, setAreas] = useState<string[]>([]);
   const [customAreaInput, setCustomAreaInput] = useState('');
 
   const [minPrice, setMinPrice] = useState<number | ''>('');
@@ -143,8 +143,8 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
       setAddress('');
       setSource('Khách hàng giới thiệu');
       setDemandType('MUA');
-      setPropertyTypes(['Nhà phố']);
-      setAreas(['Quận 1']);
+      setPropertyTypes([]);
+      setAreas([]);
       setMinPrice('');
       setMaxPrice('');
       setMinArea('');
@@ -180,11 +180,16 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
 
   const togglePropertyType = (cat: PropertyCategory) => {
     if (propertyTypes.includes(cat)) {
-      if (propertyTypes.length > 1) {
-        setPropertyTypes(propertyTypes.filter((p) => p !== cat));
-      }
+      setPropertyTypes(propertyTypes.filter((p) => p !== cat));
     } else {
       setPropertyTypes([...propertyTypes, cat]);
+    }
+    if (errors.propertyTypes) {
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next.propertyTypes;
+        return next;
+      });
     }
   };
 
@@ -193,6 +198,13 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
       setAreas(areas.filter((a) => a !== areaName));
     } else {
       setAreas([...areas, areaName]);
+    }
+    if (errors.areas) {
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next.areas;
+        return next;
+      });
     }
   };
 
@@ -204,10 +216,17 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
         setAreas([...areas, val]);
       }
       setCustomAreaInput('');
+      if (errors.areas) {
+        setErrors((prev) => {
+          const next = { ...prev };
+          delete next.areas;
+          return next;
+        });
+      }
     }
   };
 
-  const validate = () => {
+  const validate逃 = () => {
     const errs: { [key: string]: string } = {};
     if (!fullName.trim()) errs.fullName = 'Vui lòng nhập họ tên khách hàng';
     if (!phone.trim()) {
@@ -217,7 +236,11 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
     }
 
     if (propertyTypes.length === 0) {
-      errs.propertyTypes = 'Vui lòng chọn ít nhất 1 loại hình BĐS';
+      errs.propertyTypes = 'Vui lòng chủ động chọn ít nhất 1 loại hình BĐS mong muốn';
+    }
+
+    if (areas.length === 0) {
+      errs.areas = 'Vui lòng chủ động chọn hoặc nhập ít nhất 1 khu vực quan tâm';
     }
 
     if (minPrice && maxPrice && Number(minPrice) > Number(maxPrice)) {
@@ -227,6 +250,7 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
+  const validate = validate逃;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -547,6 +571,7 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
                   ))}
                 </div>
               )}
+              {errors.areas && <p className="text-[11px] text-rose-500 mt-1.5">{errors.areas}</p>}
             </div>
 
             {/* Budget Range & Area Range */}

@@ -1,8 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
 import { Customer } from '../../types';
-import { formatVND, formatDateVN } from '../../utils/formatters';
+import { formatVND, formatDateVN, classifyAppointment } from '../../utils/formatters';
 import { CustomerDemandBadge, CustomerPotentialBadge, CustomerStatusBadge } from '../../components/customers/CustomerBadges';
 import { CustomerFormModal } from '../../components/customers/CustomerFormModal';
 import { CustomerDetailModal } from '../../components/customers/CustomerDetailModal';
@@ -71,6 +71,20 @@ export const CustomerList: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
+  // Reset pagination to page 1 whenever any search or filter criteria changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [
+    searchQuery,
+    demandFilter,
+    potentialFilter,
+    statusFilter,
+    agentFilter,
+    teamFilter,
+    hasUpcomingAppointmentFilter,
+    quickTab,
+  ]);
+
   // Selection
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
@@ -115,13 +129,16 @@ export const CustomerList: React.FC = () => {
   // Apply Search and Advanced Filters
   const filteredCustomers = useMemo(() => {
     return accessibleCustomers.filter((c) => {
+      const aptAnalysis = classifyAppointment(c.nextAppointmentDate);
+
       // Quick Tab handling
       if (quickTab === 'MY_CUSTOMERS' && c.assignedAgentId !== currentUser?.id) return false;
       if (quickTab === 'MUA' && c.demandType !== 'MUA') return false;
       if (quickTab === 'THUE' && c.demandType !== 'THUE') return false;
       if (quickTab === 'SANG_NHUONG' && c.demandType !== 'SANG_NHUONG') return false;
       if (quickTab === 'HOT_LEADS' && c.potentialLevel !== 'Nóng') return false;
-      if (quickTab === 'UPCOMING' && !c.nextAppointmentDate) return false;
+      // Only count and show active upcoming or today appointments (exclude past/overdue)
+      if (quickTab === 'UPCOMING' && !aptAnalysis.isUpcomingOrToday) return false;
 
       // Search Query
       if (searchQuery.trim()) {
@@ -151,8 +168,8 @@ export const CustomerList: React.FC = () => {
       // Team Filter
       if (teamFilter !== 'ALL' && c.teamId !== teamFilter) return false;
 
-      // Upcoming Appointment
-      if (hasUpcomingAppointmentFilter && !c.nextAppointmentDate) return false;
+      // Upcoming Appointment (exclude past/overdue)
+      if (hasUpcomingAppointmentFilter && !aptAnalysis.isUpcomingOrToday) return false;
 
       return true;
     });
@@ -194,7 +211,7 @@ export const CustomerList: React.FC = () => {
 
   // Paginated Customers
   const totalItems = sortedCustomers.length;
-  const totalPages = Math.ceil(totalItems / pageSize) || 1;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
   const paginatedCustomers = useMemo(() => {
     const start = (currentPage - 1) * pageSize;
     return sortedCustomers.slice(start, start + pageSize);
@@ -215,13 +232,14 @@ export const CustomerList: React.FC = () => {
     );
   };
 
-  // Metrics computation for KPI cards
+  // Metrics computation for KPI cards (using Asia/Ho_Chi_Minh appointment classification)
   const metrics = useMemo(() => {
     const total = accessibleCustomers.length;
     const hotLeads = accessibleCustomers.filter((c) => c.potentialLevel === 'Nóng').length;
     const inNegotiation = accessibleCustomers.filter((c) => c.status === 'Đang thương lượng' || c.status === 'Đã hẹn xem').length;
     const completed = accessibleCustomers.filter((c) => c.status === 'Đã giao dịch').length;
-    const upcomingApts = accessibleCustomers.filter((c) => !!c.nextAppointmentDate).length;
+    // Exclude overdue / past appointments
+    const upcomingApts = accessibleCustomers.filter((c) => classifyAppointment(c.nextAppointmentDate).isUpcomingOrToday).length;
     const deletedCount = customers.filter((c) => c.isDeleted).length;
 
     return { total, hotLeads, inNegotiation, completed, upcomingApts, deletedCount };
@@ -379,7 +397,7 @@ export const CustomerList: React.FC = () => {
           </div>
           <div className="text-2xl font-black text-amber-600 dark:text-amber-300">{metrics.upcomingApts}</div>
           <div className={`text-[11px] mt-1 ${quickTab === 'UPCOMING' ? 'text-amber-200' : 'text-slate-500'}`}>
-            Cần theo dõi sát
+            Hôm nay hoặc sắp tới
           </div>
         </div>
 
@@ -454,6 +472,15 @@ export const CustomerList: React.FC = () => {
               placeholder="Tìm theo tên, SĐT, mã khách, email, ghi chú..."
               className="w-full pl-9 pr-3.5 py-2.5 rounded-xl border border-slate-200 text-xs bg-slate-50/50 focus:bg-white focus:outline-none focus:ring-2 focus:border-slate-900 ring-slate-200"
             />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold"
+              >
+                ✕
+              </button>
+            )}
           </div>
 
           {/* Demand Filter */}
@@ -684,8 +711,7 @@ export const CustomerList: React.FC = () => {
               <tbody className="divide-y divide-slate-100">
                 {paginatedCustomers.map((cust) => {
                   const isSelected = selectedIds.includes(cust.id);
-                  const hasAppointment = !!cust.nextAppointmentDate;
-                  const isHot = cust.potentialLevel === 'Nóng';
+                  const aptAnalysis = classifyAppointment(cust.nextAppointmentDate);
 
                   return (
                     <tr
@@ -810,14 +836,19 @@ export const CustomerList: React.FC = () => {
 
                       {/* Next Appointment */}
                       <td className="py-4 px-4">
-                        {hasAppointment ? (
-                          <div className="space-y-1 p-2 bg-amber-50/80 rounded-xl border border-amber-200/70 max-w-[200px]">
-                            <div className="text-[11px] font-bold text-amber-900 flex items-center gap-1">
-                              <Calendar className="w-3 h-3 text-amber-600 shrink-0" />
-                              <span>{formatDateVN(cust.nextAppointmentDate!)}</span>
+                        {cust.nextAppointmentDate ? (
+                          <div className="space-y-1 p-2 bg-slate-50/90 rounded-xl border border-slate-200/90 max-w-[200px]">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className={`px-2 py-0.5 rounded-md text-[10px] ${aptAnalysis.badgeClass}`}>
+                                {aptAnalysis.label}
+                              </span>
+                            </div>
+                            <div className="text-[11px] font-bold text-slate-900 flex items-center gap-1">
+                              <Calendar className="w-3 h-3 text-slate-500 shrink-0" />
+                              <span>{aptAnalysis.formattedDateTime}</span>
                             </div>
                             {cust.nextAppointmentNote && (
-                              <div className="text-[10px] text-amber-800 line-clamp-1">
+                              <div className="text-[10px] text-slate-600 line-clamp-1">
                                 {cust.nextAppointmentNote}
                               </div>
                             )}
@@ -883,31 +914,28 @@ export const CustomerList: React.FC = () => {
         {/* Pagination bar */}
         {!isLoading && totalItems > 0 && (
           <div className="p-4 border-t border-slate-200 bg-slate-50/50 flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="text-xs text-slate-500">
-              Hiển thị <strong>{(currentPage - 1) * pageSize + 1}</strong> -{' '}
-              <strong>{Math.min(currentPage * pageSize, totalItems)}</strong> trong tổng số{' '}
-              <strong>{totalItems}</strong> khách hàng
+            <div className="flex items-center gap-2 text-xs text-slate-600">
+              <span>Số dòng / trang:</span>
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                  setCurrentPage(1);
+                }}
+                className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none focus:border-slate-900"
+              >
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+              </select>
             </div>
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5 text-xs text-slate-600">
-                <span>Số dòng:</span>
-                <select
-                  value={pageSize}
-                  onChange={(e) => {
-                    setPageSize(Number(e.target.value));
-                    setCurrentPage(1);
-                  }}
-                  className="px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs"
-                >
-                  <option value={10}>10</option>
-                  <option value={25}>25</option>
-                  <option value={50}>50</option>
-                </select>
-              </div>
+            <div className="flex-1 max-w-xl">
               <Pagination
                 currentPage={currentPage}
-                totalPages={totalPages}
+                totalItems={totalItems}
+                pageSize={pageSize}
                 onPageChange={(page) => setCurrentPage(page)}
+                showText={true}
               />
             </div>
           </div>
@@ -996,16 +1024,16 @@ export const CustomerList: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setDeleteConfirmId(null)}
-                className="px-4 py-2 rounded-xl border border-slate-200 text-slate-700 text-xs font-bold hover:bg-slate-50"
+                className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 text-xs font-semibold transition-colors"
               >
                 Hủy bỏ
               </button>
               <button
                 type="button"
                 onClick={() => handleDelete(deleteConfirmId)}
-                className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-xs"
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-colors shadow-xs"
               >
-                Đồng ý xóa
+                Xác nhận chuyển vào thùng rác
               </button>
             </div>
           </div>
