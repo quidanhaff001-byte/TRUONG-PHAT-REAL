@@ -1,0 +1,102 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Hồ sơ người dùng / nhân viên môi giới trong hệ thống",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "employeeCode": { "type": "string", "maxLength": 30 },
+        "fullName": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "format": "email", "maxLength": 150 },
+        "phone": { "type": "string", "maxLength": 20 },
+        "avatarUrl": { "type": "string", "maxLength": 500 },
+        "role": { "type": "string", "enum": ["ADMIN", "TEAM_LEADER", "AGENT"] },
+        "teamId": { "type": "string", "maxLength": 128 },
+        "directManagerId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["ACTIVE", "LOCKED"] },
+        "startDate": { "type": "string", "maxLength": 30 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "employeeCode", "fullName", "email", "role", "status"]
+    },
+    "Team": {
+      "title": "Team",
+      "description": "Nhóm môi giới bất động sản",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 100 },
+        "code": { "type": "string", "maxLength": 30 },
+        "leaderId": { "type": "string", "maxLength": 128 },
+        "description": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "name", "code"]
+    },
+    "Property": {
+      "title": "Property",
+      "description": "Thông tin bất động sản ký gửi bán, cho thuê, sang nhượng",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "code": { "type": "string", "maxLength": 30 },
+        "title": { "type": "string", "maxLength": 250 },
+        "transactionType": { "type": "string", "enum": ["SALE", "RENT", "TRANSFER", "SALE_AND_RENT"] },
+        "propertyType": { "type": "string", "maxLength": 50 },
+        "city": { "type": "string", "maxLength": 100 },
+        "district": { "type": "string", "maxLength": 100 },
+        "ward": { "type": "string", "maxLength": 100 },
+        "street": { "type": "string", "maxLength": 150 },
+        "address": { "type": "string", "maxLength": 300 },
+        "landArea": { "type": "number" },
+        "usableArea": { "type": "number" },
+        "width": { "type": "number" },
+        "length": { "type": "number" },
+        "floors": { "type": "number" },
+        "bedrooms": { "type": "number" },
+        "bathrooms": { "type": "number" },
+        "direction": { "type": "string", "maxLength": 30 },
+        "roadWidth": { "type": "number" },
+        "status": { "type": "string", "maxLength": 50 },
+        "salePrice": { "type": "number" },
+        "rentPrice": { "type": "number" },
+        "transferPrice": { "type": "number" },
+        "commission": { "type": "string", "maxLength": 100 },
+        "assignedAgentId": { "type": "string", "maxLength": 128 },
+        "teamId": { "type": "string", "maxLength": 128 },
+        "images": { "type": "array" },
+        "coverImage": { "type": "string", "maxLength": 500 },
+        "ownerName": { "type": "string", "maxLength": 100 },
+        "ownerPhone": { "type": "string", "maxLength": 30 },
+        "cadastralLotNumber": { "type": "string", "maxLength": 50 },
+        "cadastralSheetNumber": { "type": "string", "maxLength": 50 },
+        "description": { "type": "string", "maxLength": 5000 },
+        "internalNotes": { "type": "string", "maxLength": 2000 },
+        "isDeleted": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "createdBy": { "type": "string", "maxLength": 128 },
+        "updatedAt": { "type": "string", "maxLength": 50 },
+        "updatedBy": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "code", "title", "transactionType", "propertyType", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Tài khoản người dùng & nhân viên hệ thống"
+    },
+    "/teams/{teamId}": {
+      "schema": "Team",
+      "description": "Danh sách phòng ban/nhóm môi giới"
+    },
+    "/properties/{propertyId}": {
+      "schema": "Property",
+      "description": "Kho bất động sản ký gửi, mua bán, cho thuê, sang nhượng"
+    }
+  }
+}

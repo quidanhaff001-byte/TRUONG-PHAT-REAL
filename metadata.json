@@ -1,0 +1,6 @@
+{
+  "name": "TRUONG PHAT REAL - Quản lý Bất Động Sản",
+  "description": "Hệ thống quản lý bất động sản TRUONG PHAT REAL - Hỗ trợ kỹ thuật: 0919414884",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

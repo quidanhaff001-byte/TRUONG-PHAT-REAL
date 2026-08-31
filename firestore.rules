@@ -1,0 +1,92 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions for Role-Based Access Control (RBAC)
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function getUserRole() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+        : 'AGENT';
+    }
+
+    // 1. Quản trị viên (ADMIN) - Toàn quyền hệ thống
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'quidanh.aff001@gmail.com' ||
+        getUserRole() == 'ADMIN'
+      );
+    }
+
+    // 2. Trưởng nhóm (TEAM_LEADER) - Quản lý nhóm và nguồn hàng
+    function isTeamLeader() {
+      return isSignedIn() && (
+        isAdmin() ||
+        getUserRole() == 'TEAM_LEADER'
+      );
+    }
+
+    // 3. Môi giới (AGENT) - Ký gửi, quản lý nguồn hàng & khách hàng phụ trách
+    function isAgent() {
+      return isSignedIn();
+    }
+
+    // Users Collection (Hồ sơ nhân sự)
+    match /users/{userId} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if true;
+      allow delete: if isAdmin();
+    }
+
+    // Teams Collection (Phòng ban & Đội nhóm)
+    match /teams/{teamId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if isAdmin() || isTeamLeader();
+    }
+
+    // Properties Collection (Nguồn hàng Bất Động Sản)
+    match /properties/{propertyId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if isAdmin() || isTeamLeader();
+    }
+
+    // Customers Collection (Khách hàng & Nhu cầu)
+    match /customers/{customerId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if isAdmin() || isTeamLeader();
+    }
+
+    // Appointments (Lịch hẹn dẫn khách)
+    match /appointments/{appointmentId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if isAdmin() || isTeamLeader();
+    }
+
+    // Transactions / Deals (Giao dịch & Chốt cọc)
+    match /transactions/{transactionId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if isAdmin() || isTeamLeader();
+    }
+
+    // Audit logs (Nhật ký thao tác)
+    match /auditLogs/{logId} {
+      allow read: if true;
+      allow create: if true;
+      allow update, delete: if false;
+    }
+
+    // System Health & Pings
+    match /system_health/{id} {
+      allow read, write: if true;
+    }
+  }
+}
