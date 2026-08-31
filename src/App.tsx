@@ -11,6 +11,7 @@ import { Dashboard } from './pages/Dashboard';
 import { PropertyList } from './pages/Properties/PropertyList';
 import { PropertyForm } from './pages/Properties/PropertyForm';
 import { PropertyDetail } from './pages/Properties/PropertyDetail';
+import { CustomerList } from './pages/customers/CustomerList';
 import { UserList } from './pages/Users/UserList';
 import { TrashList } from './pages/Trash/TrashList';
 import { Settings } from './pages/Settings';
@@ -30,27 +31,12 @@ export default function App() {
                   <Route path="/properties/new" element={<PropertyForm />} />
                   <Route path="/properties/:id" element={<PropertyDetail />} />
                   <Route path="/properties/:id/edit" element={<PropertyForm />} />
+                  <Route path="/customers" element={<CustomerList />} />
                   <Route path="/users" element={<UserList />} />
                   <Route path="/trash" element={<TrashList />} />
                   <Route path="/settings" element={<Settings />} />
 
                   {/* Operational Modules */}
-                  <Route
-                    path="/customers"
-                    element={
-                      <PlaceholderModule
-                        title="Quản lý Khách hàng (CRM)"
-                        phase="Quản trị Khách hàng (CRM)"
-                        description="Hệ thống quản lý thông tin khách mua, khách thuê, nhu cầu chi tiết, phân loại nhóm khách hàng và lịch sử tương tác."
-                        features={[
-                          'Quản lý danh sách khách mua / khách thuê',
-                          'Lưu trữ nhu cầu chi tiết (Khoảng giá, diện tích, khu vực, hướng)',
-                          'Ghi nhận mức độ thiện chí và khả năng tài chính',
-                          'Nhật ký các lần tư vấn và gửi sản phẩm',
-                        ]}
-                      />
-                    }
-                  />
                   <Route
                     path="/match"
                     element={

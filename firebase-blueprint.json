@@ -83,6 +83,72 @@
         "updatedBy": { "type": "string", "maxLength": 128 }
       },
       "required": ["id", "code", "title", "transactionType", "propertyType", "status"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Hồ sơ khách hàng, nhu cầu tìm kiếm, lịch sử chăm sóc và phân công môi giới",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "code": { "type": "string", "maxLength": 30 },
+        "fullName": { "type": "string", "maxLength": 100 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "secondaryPhone": { "type": "string", "maxLength": 30 },
+        "email": { "type": "string", "format": "email", "maxLength": 150 },
+        "zalo": { "type": "string", "maxLength": 30 },
+        "address": { "type": "string", "maxLength": 300 },
+        "source": { "type": "string", "maxLength": 100 },
+        "demandType": { "type": "string", "enum": ["MUA", "THUE", "SANG_NHUONG"] },
+        "propertyTypes": { "type": "array" },
+        "areas": { "type": "array" },
+        "minPrice": { "type": "number" },
+        "maxPrice": { "type": "number" },
+        "minArea": { "type": "number" },
+        "maxArea": { "type": "number" },
+        "potentialLevel": { "type": "string", "maxLength": 50 },
+        "status": { "type": "string", "maxLength": 50 },
+        "assignedAgentId": { "type": "string", "maxLength": 128 },
+        "assignedAgentName": { "type": "string", "maxLength": 100 },
+        "teamId": { "type": "string", "maxLength": 128 },
+        "teamName": { "type": "string", "maxLength": 100 },
+        "notes": { "type": "string", "maxLength": 3000 },
+        "interactionLogs": { "type": "array" },
+        "nextAppointmentDate": { "type": "string", "maxLength": 50 },
+        "nextAppointmentNote": { "type": "string", "maxLength": 500 },
+        "isDeleted": { "type": "boolean" },
+        "deletedAt": { "type": "string", "maxLength": 50 },
+        "deletedBy": { "type": "string", "maxLength": 128 },
+        "deleteReason": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "createdBy": { "type": "string", "maxLength": 128 },
+        "updatedAt": { "type": "string", "maxLength": 50 },
+        "updatedBy": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "code", "fullName", "phone", "demandType", "potentialLevel", "status"]
+    },
+    "Appointment": {
+      "title": "Appointment",
+      "description": "Lịch hẹn dẫn khách xem nhà hoặc gặp thương lượng",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "type": { "type": "string", "maxLength": 50 },
+        "customerId": { "type": "string", "maxLength": 128 },
+        "customerName": { "type": "string", "maxLength": 100 },
+        "propertyId": { "type": "string", "maxLength": 128 },
+        "propertyCode": { "type": "string", "maxLength": 30 },
+        "propertyTitle": { "type": "string", "maxLength": 250 },
+        "assignedAgentId": { "type": "string", "maxLength": 128 },
+        "agentName": { "type": "string", "maxLength": 100 },
+        "startDateTime": { "type": "string", "maxLength": 50 },
+        "endDateTime": { "type": "string", "maxLength": 50 },
+        "location": { "type": "string", "maxLength": 300 },
+        "content": { "type": "string", "maxLength": 2000 },
+        "status": { "type": "string", "maxLength": 50 },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "title", "startDateTime", "assignedAgentId"]
     }
   },
   "firestore": {
@@ -97,6 +163,14 @@
     "/properties/{propertyId}": {
       "schema": "Property",
       "description": "Kho bất động sản ký gửi, mua bán, cho thuê, sang nhượng"
+    },
+    "/customers/{customerId}": {
+      "schema": "Customer",
+      "description": "Hồ sơ khách hàng, nhu cầu tìm kiếm và nhật ký chăm sóc"
+    },
+    "/appointments/{appointmentId}": {
+      "schema": "Appointment",
+      "description": "Lịch hẹn dẫn khách xem nhà"
     }
   }
 }

@@ -1,6 +1,17 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { Property, User, Team, PropertyFilterState, TransactionType, PropertyStatus, Customer, Appointment, AuditLog } from '../types';
-import { SAMPLE_PROPERTIES, SAMPLE_USERS, SAMPLE_TEAMS } from '../data/sampleData';
+import {
+  Property,
+  User,
+  Team,
+  PropertyFilterState,
+  TransactionType,
+  PropertyStatus,
+  Customer,
+  CustomerInteraction,
+  Appointment,
+  AuditLog,
+} from '../types';
+import { SAMPLE_PROPERTIES, SAMPLE_USERS, SAMPLE_TEAMS, SAMPLE_CUSTOMERS, SAMPLE_APPOINTMENTS } from '../data/sampleData';
 import { useAuth } from './AuthContext';
 import { useToast } from './ToastContext';
 import { generatePropertyCode } from '../utils/formatters';
@@ -11,6 +22,12 @@ export interface DuplicateCheckResult {
   isDuplicate: boolean;
   reasons: string[];
   matchedProperties: Property[];
+}
+
+export interface DuplicateCustomerCheckResult {
+  isDuplicate: boolean;
+  matchedCustomer?: Customer;
+  message?: string;
 }
 
 interface DataContextType {
@@ -50,11 +67,20 @@ interface DataContextType {
   // Customer Actions
   addCustomer: (customerData: Omit<Customer, 'id' | 'code' | 'createdAt' | 'updatedAt'>) => Promise<Customer>;
   updateCustomer: (id: string, data: Partial<Customer>) => Promise<void>;
-  deleteCustomer: (id: string) => Promise<void>;
+  deleteCustomer: (id: string, reason?: string) => Promise<void>;
+  restoreCustomer: (id: string) => Promise<void>;
+  permanentDeleteCustomer: (id: string) => Promise<void>;
+  addCustomerInteraction: (customerId: string, interaction: Omit<CustomerInteraction, 'id' | 'createdAt'>) => Promise<void>;
+  assignCustomerAgent: (customerId: string, agentId: string, transferNote?: string) => Promise<void>;
+  bulkAssignCustomerAgent: (customerIds: string[], agentId: string) => Promise<void>;
+  bulkUpdateCustomerStatus: (customerIds: string[], status: Customer['status']) => Promise<void>;
+  bulkDeleteCustomers: (customerIds: string[], reason?: string) => Promise<void>;
+  checkDuplicateCustomerPhone: (phone: string, excludeId?: string) => DuplicateCustomerCheckResult;
 
   // Appointment Actions
   addAppointment: (appointmentData: Omit<Appointment, 'id' | 'createdAt'>) => Promise<Appointment>;
   updateAppointment: (id: string, data: Partial<Appointment>) => Promise<void>;
+  deleteAppointment: (id: string) => Promise<void>;
   
   // Reset / Seed
   seedInitialDataToFirestore: () => Promise<void>;
@@ -89,8 +115,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [properties, setProperties] = useState<Property[]>(SAMPLE_PROPERTIES);
   const [users, setUsers] = useState<User[]>(SAMPLE_USERS);
   const [teams, setTeams] = useState<Team[]>(SAMPLE_TEAMS);
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>(SAMPLE_CUSTOMERS);
+  const [appointments, setAppointments] = useState<Appointment[]>(SAMPLE_APPOINTMENTS);
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [filterState, setFilterState] = useState<PropertyFilterState>(defaultFilterState);
@@ -110,6 +136,14 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // Seed properties
       for (const p of SAMPLE_PROPERTIES) {
         await setDoc(doc(db, 'properties', p.id), p, { merge: true });
+      }
+      // Seed customers
+      for (const c of SAMPLE_CUSTOMERS) {
+        await setDoc(doc(db, 'customers', c.id), c, { merge: true });
+      }
+      // Seed appointments
+      for (const a of SAMPLE_APPOINTMENTS) {
+        await setDoc(doc(db, 'appointments', a.id), a, { merge: true });
       }
       success('Đã đồng bộ cơ sở dữ liệu lên Cloud Firestore');
     } catch (err) {
@@ -218,11 +252,13 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setProperties(SAMPLE_PROPERTIES);
     setUsers(SAMPLE_USERS);
     setTeams(SAMPLE_TEAMS);
+    setCustomers(SAMPLE_CUSTOMERS);
+    setAppointments(SAMPLE_APPOINTMENTS);
     seedInitialDataToFirestore();
-    success('Đã nạp lại dữ liệu chuẩn', 'Dữ liệu bất động sản và nhân sự đã được đồng bộ chuẩn Cloud.');
+    success('Đã nạp lại dữ liệu chuẩn', 'Dữ liệu bất động sản, khách hàng và nhân sự đã được đồng bộ chuẩn Cloud.');
   };
 
-  // Duplicate Check logic
+  // Duplicate Check logic for Properties
   const checkDuplicateProperty = (data: Partial<Property>, excludeId?: string): DuplicateCheckResult => {
     const reasons: string[] = [];
     const matchedProps: Property[] = [];
@@ -275,6 +311,37 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       reasons,
       matchedProperties: matchedProps,
     };
+  };
+
+  // Check duplicate customer phone
+  const checkDuplicateCustomerPhone = (phone: string, excludeId?: string): DuplicateCustomerCheckResult => {
+    if (!phone || phone.trim().length < 8) {
+      return { isDuplicate: false };
+    }
+
+    const cleanInput = phone.replace(/\D/g, '');
+    if (!cleanInput) return { isDuplicate: false };
+
+    const activeCustomers = customers.filter((c) => !c.isDeleted && c.id !== excludeId);
+    for (const cust of activeCustomers) {
+      const p1 = cust.phone ? cust.phone.replace(/\D/g, '') : '';
+      const p2 = cust.secondaryPhone ? cust.secondaryPhone.replace(/\D/g, '') : '';
+      const pZalo = cust.zalo ? cust.zalo.replace(/\D/g, '') : '';
+
+      if (
+        (p1 && p1 === cleanInput) ||
+        (p2 && p2 === cleanInput) ||
+        (pZalo && pZalo === cleanInput)
+      ) {
+        return {
+          isDuplicate: true,
+          matchedCustomer: cust,
+          message: `Số điện thoại ${phone} đã tồn tại trên hệ thống thuộc về khách hàng "${cust.fullName}" (${cust.code}) do môi giới "${cust.assignedAgentName || 'Hệ thống'}" phụ trách.`,
+        };
+      }
+    }
+
+    return { isDuplicate: false };
   };
 
   // Add Property (Saves directly to Firestore)
@@ -613,54 +680,265 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Customer Management (Firestore synced)
   const addCustomer = async (customerData: Omit<Customer, 'id' | 'code' | 'createdAt' | 'updatedAt'>): Promise<Customer> => {
     const newId = `cust_${Date.now()}`;
-    const newCode = `KH-${Math.floor(1000 + Math.random() * 9000)}`;
+    const count = customers.length + 1;
+    const newCode = `KH-${String(count).padStart(6, '0')}`;
     const now = new Date().toISOString();
+
+    const assignedAgent = users.find((u) => u.id === customerData.assignedAgentId);
+    const team = teams.find((t) => t.id === (customerData.teamId || assignedAgent?.teamId));
+
     const newCust: Customer = {
       ...customerData,
       id: newId,
       code: newCode,
+      assignedAgentName: assignedAgent ? assignedAgent.fullName : customerData.assignedAgentName || 'Chưa phân công',
+      assignedAgentPhone: assignedAgent ? assignedAgent.phone : undefined,
+      teamId: team?.id || customerData.teamId,
+      teamName: team?.name || customerData.teamName,
+      interactionLogs: customerData.interactionLogs || [],
+      isDeleted: false,
       createdAt: now,
+      createdBy: currentUser?.id || 'anonymous',
+      createdByName: currentUser?.fullName || 'Người dùng',
       updatedAt: now,
+      updatedBy: currentUser?.id,
     };
 
     if (isFirebaseConfigured) {
       try {
         await setDoc(doc(db, 'customers', newId), newCust);
       } catch (err) {
-        console.error(err);
+        console.error('Add customer to Firestore error:', err);
       }
     }
 
     setCustomers((prev) => [newCust, ...prev]);
-    success('Thêm khách hàng thành công', `Đã tạo khách hàng mã ${newCode}`);
+    success('Thêm khách hàng thành công', `Đã tạo khách hàng mã ${newCode} (${newCust.fullName})`);
     return newCust;
   };
 
   const updateCustomer = async (id: string, data: Partial<Customer>): Promise<void> => {
     const now = new Date().toISOString();
+    let updatedObj: Customer | null = null;
+
     setCustomers((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, ...data, updatedAt: now } : c))
+      prev.map((c) => {
+        if (c.id === id) {
+          const assignedAgent = data.assignedAgentId ? users.find((u) => u.id === data.assignedAgentId) : undefined;
+          const team = data.teamId ? teams.find((t) => t.id === data.teamId) : undefined;
+
+          updatedObj = {
+            ...c,
+            ...data,
+            assignedAgentName: assignedAgent ? assignedAgent.fullName : (data.assignedAgentName !== undefined ? data.assignedAgentName : c.assignedAgentName),
+            assignedAgentPhone: assignedAgent ? assignedAgent.phone : c.assignedAgentPhone,
+            teamName: team ? team.name : (data.teamName !== undefined ? data.teamName : c.teamName),
+            updatedAt: now,
+            updatedBy: currentUser?.id,
+          };
+          return updatedObj;
+        }
+        return c;
+      })
     );
-    if (isFirebaseConfigured) {
+
+    if (isFirebaseConfigured && updatedObj) {
       try {
-        await updateDoc(doc(db, 'customers', id), { ...data, updatedAt: now });
+        await updateDoc(doc(db, 'customers', id), updatedObj as any);
       } catch (err) {
-        console.error(err);
+        console.error('Update customer in Firestore error:', err);
       }
     }
-    success('Cập nhật khách hàng thành công');
+    success('Cập nhật khách hàng thành công', 'Thông tin khách hàng đã được lưu.');
   };
 
-  const deleteCustomer = async (id: string): Promise<void> => {
+  // Customer Soft Delete
+  const deleteCustomer = async (id: string, reason = 'Xóa vào thùng rác'): Promise<void> => {
+    const now = new Date().toISOString();
+    const updateData = {
+      isDeleted: true,
+      deletedAt: now,
+      deletedBy: currentUser?.id,
+      deleteReason: reason,
+    };
+
+    setCustomers((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, ...updateData } : c))
+    );
+
+    if (isFirebaseConfigured) {
+      try {
+        await updateDoc(doc(db, 'customers', id), updateData);
+      } catch (err) {
+        console.error('Soft delete customer error:', err);
+      }
+    }
+
+    info('Đã chuyển khách hàng vào thùng rác', 'Bạn có thể khôi phục lại bất kỳ lúc nào.');
+  };
+
+  // Customer Restore
+  const restoreCustomer = async (id: string): Promise<void> => {
+    const updateData = {
+      isDeleted: false,
+      deletedAt: undefined,
+      deletedBy: undefined,
+      deleteReason: undefined,
+    };
+
+    setCustomers((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, ...updateData } : c))
+    );
+
+    if (isFirebaseConfigured) {
+      try {
+        await updateDoc(doc(db, 'customers', id), updateData as any);
+      } catch (err) {
+        console.error('Restore customer error:', err);
+      }
+    }
+
+    success('Khôi phục khách hàng thành công', 'Khách hàng đã trở lại danh sách hoạt động.');
+  };
+
+  // Permanent Delete Customer
+  const permanentDeleteCustomer = async (id: string): Promise<void> => {
     setCustomers((prev) => prev.filter((c) => c.id !== id));
     if (isFirebaseConfigured) {
       try {
         await deleteDoc(doc(db, 'customers', id));
       } catch (err) {
-        console.error(err);
+        console.error('Permanent delete customer error:', err);
       }
     }
-    info('Đã xóa khách hàng');
+    info('Đã xóa vĩnh viễn khách hàng');
+  };
+
+  // Add Interaction Log to Customer
+  const addCustomerInteraction = async (
+    customerId: string,
+    interaction: Omit<CustomerInteraction, 'id' | 'createdAt'>
+  ): Promise<void> => {
+    const targetCust = customers.find((c) => c.id === customerId);
+    if (!targetCust) return;
+
+    const newLogId = `log_${Date.now()}`;
+    const now = new Date().toISOString();
+    const newLog: CustomerInteraction = {
+      ...interaction,
+      id: newLogId,
+      createdAt: now,
+    };
+
+    const updatedLogs = [newLog, ...(targetCust.interactionLogs || [])];
+    const updatePayload: Partial<Customer> = {
+      interactionLogs: updatedLogs,
+      updatedAt: now,
+    };
+
+    if (interaction.nextActionDate) {
+      updatePayload.nextAppointmentDate = interaction.nextActionDate;
+      updatePayload.nextAppointmentNote = interaction.nextActionNote || interaction.title;
+    }
+
+    await updateCustomer(customerId, updatePayload);
+    success('Đã lưu nhật ký chăm sóc', `${interaction.title} (${newLog.agentName})`);
+  };
+
+  // Assign Customer to Agent
+  const assignCustomerAgent = async (customerId: string, agentId: string, transferNote?: string): Promise<void> => {
+    const agent = users.find((u) => u.id === agentId);
+    if (!agent) return;
+    const targetCust = customers.find((c) => c.id === customerId);
+    const now = new Date().toISOString();
+
+    const transferLog: CustomerInteraction = {
+      id: `log_${Date.now()}`,
+      date: now,
+      type: 'NOTE',
+      title: `Chuyển người phụ trách sang ${agent.fullName}`,
+      content: transferNote || `Chuyển giao khách hàng từ ${targetCust?.assignedAgentName || 'Hệ thống'} sang ${agent.fullName}`,
+      agentId: currentUser?.id || 'admin',
+      agentName: currentUser?.fullName || 'Quản trị viên',
+      createdAt: now,
+    };
+
+    const updatedLogs = [transferLog, ...(targetCust?.interactionLogs || [])];
+
+    await updateCustomer(customerId, {
+      assignedAgentId: agent.id,
+      assignedAgentName: agent.fullName,
+      assignedAgentPhone: agent.phone,
+      teamId: agent.teamId,
+      teamName: agent.teamName,
+      interactionLogs: updatedLogs,
+    });
+
+    success('Đã chuyển người phụ trách', `Giao khách hàng cho ${agent.fullName}`);
+  };
+
+  // Bulk Assign Customer Agent
+  const bulkAssignCustomerAgent = async (customerIds: string[], agentId: string): Promise<void> => {
+    if (customerIds.length === 0) return;
+    const agent = users.find((u) => u.id === agentId);
+    if (!agent) return;
+    const now = new Date().toISOString();
+
+    for (const cid of customerIds) {
+      await assignCustomerAgent(cid, agentId, `Chuyển giao hàng loạt sang ${agent.fullName}`);
+    }
+
+    success(`Đã phân công ${customerIds.length} khách hàng`, `Giao cho ${agent.fullName}`);
+  };
+
+  // Bulk Update Customer Status
+  const bulkUpdateCustomerStatus = async (customerIds: string[], status: Customer['status']): Promise<void> => {
+    if (customerIds.length === 0) return;
+    const now = new Date().toISOString();
+
+    setCustomers((prev) =>
+      prev.map((c) => (customerIds.includes(c.id) ? { ...c, status, updatedAt: now } : c))
+    );
+
+    if (isFirebaseConfigured) {
+      for (const id of customerIds) {
+        try {
+          await updateDoc(doc(db, 'customers', id), { status, updatedAt: now });
+        } catch (err) {
+          console.error(err);
+        }
+      }
+    }
+
+    success(`Đã chuyển trạng thái ${customerIds.length} khách hàng`, `Tất cả sang "${status}"`);
+  };
+
+  // Bulk Delete Customers
+  const bulkDeleteCustomers = async (customerIds: string[], reason = 'Xóa hàng loạt'): Promise<void> => {
+    if (customerIds.length === 0) return;
+    const now = new Date().toISOString();
+    const updatePayload = {
+      isDeleted: true,
+      deletedAt: now,
+      deletedBy: currentUser?.id,
+      deleteReason: reason,
+    };
+
+    setCustomers((prev) =>
+      prev.map((c) => (customerIds.includes(c.id) ? { ...c, ...updatePayload } : c))
+    );
+
+    if (isFirebaseConfigured) {
+      for (const id of customerIds) {
+        try {
+          await updateDoc(doc(db, 'customers', id), updatePayload);
+        } catch (err) {
+          console.error(err);
+        }
+      }
+    }
+
+    info(`Đã chuyển ${customerIds.length} khách hàng vào thùng rác`);
   };
 
   // Appointment Management (Firestore synced)
@@ -698,6 +976,18 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     }
     success('Cập nhật lịch hẹn thành công');
+  };
+
+  const deleteAppointment = async (id: string): Promise<void> => {
+    setAppointments((prev) => prev.filter((a) => a.id !== id));
+    if (isFirebaseConfigured) {
+      try {
+        await deleteDoc(doc(db, 'appointments', id));
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    info('Đã hủy lịch hẹn');
   };
 
   // Filtered Properties Computation
@@ -796,8 +1086,17 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         addCustomer,
         updateCustomer,
         deleteCustomer,
+        restoreCustomer,
+        permanentDeleteCustomer,
+        addCustomerInteraction,
+        assignCustomerAgent,
+        bulkAssignCustomerAgent,
+        bulkUpdateCustomerStatus,
+        bulkDeleteCustomers,
+        checkDuplicateCustomerPhone,
         addAppointment,
         updateAppointment,
+        deleteAppointment,
         seedInitialDataToFirestore,
         resetDemoData,
       }}
@@ -814,3 +1113,4 @@ export const useData = () => {
   }
   return context;
 };
+

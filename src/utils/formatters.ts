@@ -100,6 +100,7 @@ export function maskPhone(phone?: string | null, canViewFull: boolean = false): 
 }
 
 export const maskPhoneNumber = maskPhone;
+export const formatDateVN = formatDateTime;
 
 /**
  * Format relative date (Hôm nay, Hôm qua, X ngày trước)

@@ -271,6 +271,19 @@ export interface Property {
   updatedBy?: string;
 }
 
+export interface CustomerInteraction {
+  id: string;
+  date: string;
+  type: 'CALL' | 'MEETING' | 'ZALO' | 'VIEWING' | 'SEND_PROPERTY' | 'NOTE';
+  title: string;
+  content: string;
+  agentId: string;
+  agentName: string;
+  nextActionDate?: string;
+  nextActionNote?: string;
+  createdAt: string;
+}
+
 export interface Customer {
   id: string;
   code: string;
@@ -289,13 +302,40 @@ export interface Customer {
   minArea?: number;
   maxArea?: number;
   potentialLevel: 'Nóng' | 'Tiềm năng' | 'Tham khảo' | 'Chưa phù hợp' | 'Ngưng chăm sóc';
-  status: 'Mới tiếp nhận' | 'Đang tư vấn' | 'Đã gửi sản phẩm' | 'Đã hẹn xem' | 'Đang thương lượng' | 'Đã giao dịch';
+  status: 'Mới tiếp nhận' | 'Đang tư vấn' | 'Đã gửi sản phẩm' | 'Đã hẹn xem' | 'Đang thương lượng' | 'Đã giao dịch' | 'Tạm dừng' | 'Không có nhu cầu';
   assignedAgentId: string;
   assignedAgentName?: string;
+  assignedAgentPhone?: string;
   teamId?: string;
+  teamName?: string;
   notes?: string;
+  interactionLogs?: CustomerInteraction[];
+  nextAppointmentDate?: string;
+  nextAppointmentNote?: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
+  deleteReason?: string;
   createdAt: string;
+  createdBy?: string;
+  createdByName?: string;
   updatedAt: string;
+  updatedBy?: string;
+}
+
+export interface CustomerFilterState {
+  searchQuery: string;
+  demandType: string;
+  propertyType: string;
+  area: string;
+  status: string;
+  potentialLevel: string;
+  assignedAgentId: string;
+  teamId: string;
+  minPrice?: number;
+  maxPrice?: number;
+  hasAppointmentOnly?: boolean;
+  isDeleted?: boolean;
 }
 
 export interface Appointment {
