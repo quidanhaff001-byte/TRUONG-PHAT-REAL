@@ -138,11 +138,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     try {
       setIsLoading(true);
 
-      // Check if input matches any provisioned account (by email or employeeCode)
+      // Check if input matches any provisioned account (by email, employeeCode, or 'admin' alias)
       const matched = SAMPLE_USERS.find(
         (u) =>
           u.email.toLowerCase() === cleanAccount ||
-          u.employeeCode.toLowerCase() === cleanAccount
+          u.employeeCode.toLowerCase() === cleanAccount ||
+          (cleanAccount === 'admin' && u.role === 'ADMIN')
       );
 
       if (matched) {

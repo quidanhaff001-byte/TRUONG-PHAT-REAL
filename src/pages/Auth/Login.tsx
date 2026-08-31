@@ -288,7 +288,7 @@ export const Login: React.FC = () => {
                       setAccountInput(e.target.value);
                       if (errorMessage) setErrorMessage('');
                     }}
-                    placeholder="Nhập Email hoặc Mã nhân viên (ví dụ: TP-001)"
+                    placeholder="Nhập Email, Mã NV (TP-001) hoặc Tài khoản Quản trị (admin)"
                     className="w-full pl-10 pr-4 py-3 bg-[#00172e] border border-white/15 rounded-xl text-xs text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 focus:border-[#D4AF37] transition-all"
                   />
                 </div>
