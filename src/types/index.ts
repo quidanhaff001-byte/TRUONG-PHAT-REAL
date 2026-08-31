@@ -1,23 +1,29 @@
 export type UserRole = 'ADMIN' | 'TEAM_LEADER' | 'AGENT';
-export type UserStatus = 'ACTIVE' | 'LOCKED';
+export type UserStatus = 'ACTIVE' | 'LOCKED' | 'PENDING';
 
 export interface User {
   id: string;
+  uid?: string;
   employeeCode: string;
   fullName: string;
   email: string;
   phone: string;
   avatarUrl?: string;
   role: UserRole;
-  teamId?: string;
+  teamId?: string | null;
   teamName?: string;
   directManagerId?: string;
   directManagerName?: string;
   status: UserStatus;
+  mustChangePassword?: boolean;
   startDate?: string;
   notes?: string;
   createdAt: string;
-  lastLoginAt?: string;
+  createdBy?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+  lastLoginAt?: string | null;
+  lastPasswordChangeAt?: string | null;
   propertiesCount?: number;
   customersCount?: number;
   dealsCount?: number;
@@ -816,7 +822,11 @@ export interface AuditLog {
     | 'ASSIGN'
     | 'VIEW_SENSITIVE'
     | 'LOCK_USER'
+    | 'UNLOCK_USER'
     | 'CHANGE_ROLE'
+    | 'PASSWORD_RESET'
+    | 'TEMP_PASSWORD'
+    | 'REVOKE_SESSIONS'
     | 'SETTINGS_CHANGE'
     | 'SPLIT_COMMISSION'
     | 'STATUS_CHANGE';
@@ -832,17 +842,27 @@ export interface AuditLog {
     | 'APPOINTMENTS'
     | 'MATCHES'
     | 'SETTINGS'
-    | 'AUTH';
+    | 'AUTH'
+    | 'SYSTEM';
   recordId?: string;
   recordCode?: string;
   recordName?: string;
   targetId?: string;
   targetCode?: string;
-  description: string;
+  targetUserId?: string;
+  targetUserName?: string;
+  description?: string;
+  details?: string;
   oldData?: any;
   newData?: any;
+  beforeData?: any;
+  afterData?: any;
   level?: AuditLogLevel;
   deviceInfo?: string;
+  ipAddress?: string;
+  userAgent?: string;
+  status?: 'SUCCESS' | 'FAILURE';
+  errorMessage?: string;
 }
 
 export interface Notification {

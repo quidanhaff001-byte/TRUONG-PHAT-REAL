@@ -27,6 +27,13 @@ export function validatePropertyImageFile(
   file: File,
   existingFiles: { name: string; size: number }[] = []
 ): { valid: boolean; error?: string } {
+  if (!file || !(file instanceof File)) {
+    return {
+      valid: false,
+      error: 'Tệp không hợp lệ hoặc đã bị hủy.',
+    };
+  }
+
   const fileName = file.name || 'Ảnh';
   const ext = fileName.split('.').pop()?.toLowerCase() || '';
 
@@ -48,7 +55,7 @@ export function validatePropertyImageFile(
   if (dangerousExts.includes(ext)) {
     return {
       valid: false,
-      error: `Tệp "${fileName}" là tệp thực thi nguy hiểm, hệ thống nghiêm cấm tải lên.`,
+      error: `Tệp "${fileName}" là tệp thực thi không an toàn, hệ thống từ chối tải lên.`,
     };
   }
 
@@ -61,7 +68,7 @@ export function validatePropertyImageFile(
   if (!isMimeValid && !isExtValid) {
     return {
       valid: false,
-      error: `Ảnh "${fileName}" không đúng định dạng. Hệ thống chỉ hỗ trợ định dạng JPG, JPEG, PNG và WEBP.`,
+      error: `Ảnh "${fileName}" không đúng định dạng. Hệ thống chỉ hỗ trợ JPG, JPEG, PNG và WEBP.`,
     };
   }
 
@@ -81,7 +88,7 @@ export function validatePropertyImageFile(
   if (isDuplicate) {
     return {
       valid: false,
-      error: `Ảnh "${fileName}" đã có trong danh sách tải lên, không thể chọn trùng.`,
+      error: `Ảnh "${fileName}" đã có trong danh sách tải lên.`,
     };
   }
 
@@ -89,17 +96,21 @@ export function validatePropertyImageFile(
 }
 
 /**
- * Uploads a single property image to Firebase Storage at path:
- * properties/{propertyId}/images/{timestamp}_{safeName}
+ * Uploads a single property image File/Blob directly to Firebase Storage at path:
+ * properties/{propertyId}/images/{uniqueFileName}
  * Returns complete PropertyImageItem metadata with genuine downloadURL
  */
 export async function uploadPropertyImageToStorage(
-  file: File,
+  file: File | Blob,
   propertyId: string,
   options: {
+    fileName?: string;
     isCover?: boolean;
     sortOrder?: number;
     uploadedBy?: string;
+    width?: number;
+    height?: number;
+    skipCompress?: boolean;
     onProgress?: (progress: number) => void;
   } = {}
 ): Promise<PropertyImageItem> {
@@ -107,40 +118,60 @@ export async function uploadPropertyImageToStorage(
     throw new Error('Chưa kết nối Firebase Storage hoặc cấu hình Storage Bucket không hợp lệ.');
   }
 
-  // Step 1: Compress client-side to standard max dimension (1920x1440)
-  const compressed = await compressImage(file, 1920, 1440, 0.85);
-  const fileToUpload = compressed.file;
+  if (!file || !(file instanceof File || file instanceof Blob)) {
+    throw new Error('Đối tượng tệp không hợp lệ.');
+  }
 
+  const originalName = options.fileName || (file instanceof File ? file.name : `img_${Date.now()}.jpg`);
+  const safeOriginalName = originalName.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/\.[^/.]+$/, '');
   const timestamp = Date.now();
-  const safeOriginalName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/\.[^/.]+$/, '');
   const uniqueFileName = `${timestamp}_${safeOriginalName}.jpg`;
   const storagePath = `properties/${propertyId}/images/${uniqueFileName}`;
   const storageRef = ref(storage, storagePath);
+
+  // Use file directly or compress if not already compressed
+  let fileToUpload: File | Blob = file;
+  let finalWidth = options.width || 0;
+  let finalHeight = options.height || 0;
+
+  if (!options.skipCompress && file instanceof File && file.size > 800 * 1024) {
+    try {
+      const compressed = await compressImage(file, 1920, 1440, 0.85);
+      fileToUpload = compressed.file;
+      finalWidth = compressed.width;
+      finalHeight = compressed.height;
+    } catch (compressErr) {
+      console.warn('Image compression fallback to direct upload:', compressErr);
+      fileToUpload = file;
+    }
+  }
 
   return new Promise((resolve, reject) => {
     const uploadTask = uploadBytesResumable(storageRef, fileToUpload, {
       contentType: 'image/jpeg',
       customMetadata: {
-        originalName: file.name,
+        originalName: originalName,
         propertyId: propertyId,
         uploadedAt: new Date().toISOString(),
-        uploadedBy: options.uploadedBy || 'Agent',
+        uploadedBy: options.uploadedBy || 'Môi giới',
       },
     });
 
     uploadTask.on(
       'state_changed',
       (snapshot) => {
-        const progress = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
-        if (options.onProgress) {
-          options.onProgress(progress);
+        if (snapshot.totalBytes > 0) {
+          const progress = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
+          if (options.onProgress) {
+            options.onProgress(progress);
+          }
         }
       },
       (error) => {
-        console.error('Firebase Storage upload error on file:', file.name, error);
-        let errorMsg = `Lỗi tải ảnh "${file.name}": `;
+        console.error(`Firebase Storage upload error for ${originalName}:`, error);
+        let errorMsg = `Lỗi tải ảnh "${originalName}": `;
         if (error.code === 'storage/unauthorized') {
-          errorMsg += 'Không đủ quyền truy cập Firebase Storage. Vui lòng đăng nhập lại.';
+          errorMsg += 'Không đủ quyền truy cập Firebase Storage.';
         } else if (error.code === 'storage/canceled') {
           errorMsg += 'Quá trình tải lên đã bị hủy.';
         } else if (error.code === 'storage/retry-limit-exceeded') {
@@ -156,25 +187,90 @@ export async function uploadPropertyImageToStorage(
           const imageItem: PropertyImageItem = {
             id: `${propertyId}_img_${timestamp}_${Math.random().toString(36).substr(2, 6)}`,
             propertyId: propertyId,
-            fileName: file.name,
+            fileName: originalName,
             storagePath: storagePath,
             downloadURL: downloadUrl,
             contentType: 'image/jpeg',
-            size: compressed.compressedSize || fileToUpload.size,
-            width: compressed.width,
-            height: compressed.height,
+            size: fileToUpload.size,
+            width: finalWidth || undefined,
+            height: finalHeight || undefined,
             isCover: Boolean(options.isCover),
             sortOrder: options.sortOrder ?? 0,
             uploadedAt: new Date().toISOString(),
-            uploadedBy: options.uploadedBy || 'Agent',
+            uploadedBy: options.uploadedBy || 'Môi giới',
           };
           resolve(imageItem);
         } catch (err: any) {
-          reject(new Error(`Không thể lấy đường dẫn tải ảnh cho "${file.name}": ${err.message}`));
+          reject(new Error(`Không thể lấy đường dẫn tải ảnh cho "${originalName}": ${err.message}`));
         }
       }
     );
   });
+}
+
+/**
+ * Upload multiple property images independently using Promise.allSettled
+ */
+export async function uploadMultiplePropertyImages(
+  items: {
+    file: File;
+    fileName: string;
+    isCover?: boolean;
+    sortOrder?: number;
+    width?: number;
+    height?: number;
+  }[],
+  propertyId: string,
+  uploadedBy?: string,
+  onItemProgress?: (index: number, progress: number) => void
+): Promise<{
+  successful: PropertyImageItem[];
+  failed: { index: number; fileName: string; error: string }[];
+  totalAttempted: number;
+}> {
+  const totalAttempted = items.length;
+  if (totalAttempted === 0) {
+    return { successful: [], failed: [], totalAttempted: 0 };
+  }
+
+  const uploadPromises = items.map((item, index) =>
+    uploadPropertyImageToStorage(item.file, propertyId, {
+      fileName: item.fileName,
+      isCover: item.isCover,
+      sortOrder: item.sortOrder ?? index,
+      uploadedBy: uploadedBy,
+      width: item.width,
+      height: item.height,
+      skipCompress: true, // Already compressed during staging
+      onProgress: (progress) => {
+        if (onItemProgress) onItemProgress(index, progress);
+      },
+    })
+  );
+
+  const results = await Promise.allSettled(uploadPromises);
+
+  const successful: PropertyImageItem[] = [];
+  const failed: { index: number; fileName: string; error: string }[] = [];
+
+  results.forEach((result, idx) => {
+    if (result.status === 'fulfilled') {
+      successful.push(result.value);
+    } else {
+      const errorReason = result.reason?.message || 'Lỗi tải ảnh lên Storage';
+      failed.push({
+        index: idx,
+        fileName: items[idx].fileName,
+        error: errorReason,
+      });
+    }
+  });
+
+  return {
+    successful,
+    failed,
+    totalAttempted,
+  };
 }
 
 /**
@@ -233,10 +329,14 @@ export async function uploadSystemLogo(
     throw new Error('Dung lượng tệp logo vượt quá giới hạn tối đa 5 MB.');
   }
 
-  let fileToUpload = file;
+  let fileToUpload: File | Blob = file;
   if (file.type !== 'image/svg+xml' && ext !== 'svg') {
-    const compressed = await compressImage(file, 800, 800, 0.92);
-    fileToUpload = compressed.file;
+    try {
+      const compressed = await compressImage(file, 800, 800, 0.92);
+      fileToUpload = compressed.file;
+    } catch (e) {
+      fileToUpload = file;
+    }
   }
 
   const timestamp = Date.now();
@@ -246,7 +346,7 @@ export async function uploadSystemLogo(
 
   return new Promise((resolve, reject) => {
     const uploadTask = uploadBytesResumable(storageRef, fileToUpload, {
-      contentType: fileToUpload.type || (ext === 'svg' ? 'image/svg+xml' : 'image/png'),
+      contentType: (fileToUpload as File).type || (ext === 'svg' ? 'image/svg+xml' : 'image/png'),
       customMetadata: {
         originalName: file.name,
         uploadedAt: new Date().toISOString(),
@@ -306,8 +406,14 @@ export async function uploadUserAvatar(
     throw new Error('Dung lượng ảnh đại diện vượt quá giới hạn tối đa 5 MB.');
   }
 
-  const cropped = await cropSquareAvatar(file, 400, 0.88);
-  const fileToUpload = cropped.file;
+  let fileToUpload: File | Blob = file;
+  try {
+    const cropped = await cropSquareAvatar(file, 400, 0.88);
+    fileToUpload = cropped.file;
+  } catch (e) {
+    fileToUpload = file;
+  }
+
   const timestamp = Date.now();
   const storagePath = `users/${userId || 'anonymous'}/avatar_${timestamp}.jpg`;
   const storageRef = ref(storage, storagePath);

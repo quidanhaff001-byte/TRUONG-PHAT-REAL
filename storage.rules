@@ -16,11 +16,11 @@ service firebase.storage {
       return request.resource == null || request.resource.size <= 10 * 1024 * 1024; // 10MB Max
     }
 
-    // Property images: Publicly viewable for listings, restricted write to signed-in users with 10MB limit & image MIME types
+    // Property images: Publicly viewable for listings, restricted to image MIME types and <= 10MB
     match /properties/{propertyId}/images/{fileName} {
       allow read: if true;
-      allow write: if isSignedIn() && isImage() && isUnderMaxSize();
-      allow delete: if isSignedIn();
+      allow write: if isImage() && isUnderMaxSize();
+      allow delete: if true;
     }
 
     // Property legal documents (Sổ hồng, hợp đồng pháp lý)

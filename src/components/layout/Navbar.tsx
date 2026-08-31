@@ -21,10 +21,9 @@ interface NavbarProps {
 }
 
 export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
-  const { currentUser, isFirebaseActive, switchDemoUser, logout } = useAuth();
-  const { users, filterState, setFilterState, resetDemoData } = useData();
+  const { currentUser, isFirebaseActive, logout } = useAuth();
+  const { filterState, setFilterState, resetDemoData } = useData();
   const [showUserDropdown, setShowUserDropdown] = useState(false);
-  const [showDemoSelector, setShowDemoSelector] = useState(false);
 
   return (
     <header className="sticky top-0 z-30 h-20 bg-white border-b border-gray-200 px-4 sm:px-8 flex items-center justify-between gap-4 shrink-0">
@@ -59,31 +58,21 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
         </div>
       </div>
 
-      {/* Right: Firebase Indicator, Demo Switcher, User Profile */}
-      <div className="flex items-center gap-3 sm:gap-6">
-        {/* Firebase Status pill */}
+      {/* Right: Firebase Indicator, User Profile */}
+      <div className="flex items-center gap-3 sm:gap-4">
+        {/* Firebase Live Status pill */}
         <div
-          title={isFirebaseActive ? 'Kết nối trực tiếp Cloud Firestore' : 'Chế độ lưu trữ nội bộ (Demo / Offline Ready)'}
-          className={`hidden md:flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border ${
+          title={isFirebaseActive ? 'Kết nối trực tiếp Cloud Firestore & Auth Custom Claims' : 'Chế độ lưu trữ nội bộ'}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border shadow-xs ${
             isFirebaseActive
-              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-              : 'bg-amber-50 text-[#D4AF37] border-amber-200'
+              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+              : 'bg-amber-50 text-[#001f3f] border-amber-200'
           }`}
         >
-          <Database className="w-3.5 h-3.5" />
-          <span>{isFirebaseActive ? 'Firebase Live' : 'Bản Thử Nghiệm'}</span>
+          <Database className="w-3.5 h-3.5 text-emerald-600" />
+          <span className="hidden sm:inline">Firebase Live</span>
+          <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded font-bold">RBAC</span>
         </div>
-
-        {/* Switch demo account button */}
-        <button
-          type="button"
-          onClick={() => setShowDemoSelector(!showDemoSelector)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-[#001f3f] text-xs font-semibold rounded-lg transition-colors border border-gray-200"
-        >
-          <UserCheck className="w-3.5 h-3.5 text-[#D4AF37]" />
-          <span className="hidden sm:inline">Đổi vai trò</span>
-          <ChevronDown className="w-3.5 h-3.5 opacity-70" />
-        </button>
 
         {/* User profile dropdown trigger */}
         <div className="relative">
@@ -138,7 +127,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
 
               <button
                 onClick={logout}
-                className="w-full flex items-center gap-2.5 px-3 py-2 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors text-left font-medium"
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors text-left font-medium cursor-pointer"
               >
                 <LogOut className="w-4 h-4" />
                 <span>Đăng xuất</span>
@@ -147,77 +136,6 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
           )}
         </div>
       </div>
-
-      {/* Demo User Selector Modal */}
-      {showDemoSelector && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
-            <h3 className="text-base font-bold text-slate-900 mb-1 flex items-center gap-2">
-              <UserCheck className="w-5 h-5 text-[#b38e22]" />
-              Chọn tài khoản thử nghiệm
-            </h3>
-            <p className="text-xs text-slate-500 mb-4">
-              Chuyển đổi vai trò tức thời để kiểm tra cơ chế phân quyền thực tế:
-            </p>
-
-            <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
-              {users.map((user) => {
-                const isCurrent = currentUser?.id === user.id;
-                return (
-                  <button
-                    key={user.id}
-                    onClick={() => {
-                      switchDemoUser(user.id);
-                      setShowDemoSelector(false);
-                    }}
-                    className={`w-full p-3 rounded-xl border text-left flex items-center gap-3 transition-all ${
-                      isCurrent
-                        ? 'border-[#D4AF37] bg-amber-50/50 ring-2 ring-[#D4AF37]/30'
-                        : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                    }`}
-                  >
-                    <Avatar
-                      src={user.avatarUrl}
-                      name={user.fullName}
-                      size="md"
-                      status={user.status}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-xs text-slate-900 truncate">{user.fullName}</span>
-                        {isCurrent && (
-                          <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.2 rounded">
-                            Hiện tại
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-[11px] text-slate-500 mt-0.5 truncate">{user.notes || user.email}</div>
-                      <div className="mt-1 flex items-center gap-1.5">
-                        <RoleBadge role={user.role} />
-                        {user.teamName && (
-                          <span className="text-[10px] text-slate-500 truncate max-w-[150px]">
-                            • {user.teamName}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="mt-5 flex justify-end">
-              <button
-                type="button"
-                onClick={() => setShowDemoSelector(false)}
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl"
-              >
-                Đóng
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </header>
   );
 };

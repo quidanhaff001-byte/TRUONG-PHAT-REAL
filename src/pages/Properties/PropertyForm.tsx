@@ -93,7 +93,7 @@ export const PropertyForm: React.FC = () => {
 
   const { properties, addProperty, updateProperty, checkDuplicateProperty, users, teams } = useData();
   const { currentUser, canEditProperty, isAdmin } = useAuth();
-  const { success, error, warning } = useToast();
+  const { success, error, warning, info } = useToast();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState<boolean>(false);
@@ -254,9 +254,14 @@ export const PropertyForm: React.FC = () => {
   const handleSelectFiles = async (files: FileList | File[] | null) => {
     if (!files || files.length === 0) return;
 
-    const fileArray = Array.from(files);
-    const MAX_TOTAL_IMAGES = 20;
+    // 1. Ensure each element is a genuine File instance
+    const fileArray = Array.from(files).filter((f): f is File => f instanceof File);
+    if (fileArray.length === 0) {
+      error('Tệp không hợp lệ', 'Không tìm thấy tệp ảnh hợp lệ từ nguồn chọn.');
+      return;
+    }
 
+    const MAX_TOTAL_IMAGES = 20;
     if (stagedImages.length + fileArray.length > MAX_TOTAL_IMAGES) {
       error(
         'Vượt quá giới hạn',
@@ -267,18 +272,19 @@ export const PropertyForm: React.FC = () => {
 
     const newStagedList: StagedImageItem[] = [];
     const existingFileInfo = stagedImages.map((s) => ({ name: s.fileName, size: s.originalSize }));
+    const invalidFiles: { name: string; reason: string }[] = [];
 
     for (const file of fileArray) {
-      // 1. Validation
+      // Validation (Format, Apple HEIC, Max 10MB, Duplicate)
       const validation = validatePropertyImageFile(file, existingFileInfo);
       if (!validation.valid) {
-        warning('Bỏ qua ảnh không hợp lệ', validation.error || 'Ảnh không hợp lệ.');
+        invalidFiles.push({ name: file.name, reason: validation.error || 'Ảnh không hợp lệ.' });
         continue;
       }
 
       existingFileInfo.push({ name: file.name, size: file.size });
 
-      // 2. Client-side compression for instant thumbnail and optimized upload
+      // Client-side compression & preview generation
       try {
         const compressed = await compressImage(file, 1920, 1440, 0.85);
         const stagedId = `staged_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
@@ -299,8 +305,8 @@ export const PropertyForm: React.FC = () => {
           progress: 0,
         });
       } catch (err: any) {
-        console.error('Compress image preview error:', err);
-        // Fallback using URL.createObjectURL for preview
+        console.warn('Compress image preview warning:', err);
+        // Safe fallback using object URL
         const objUrl = URL.createObjectURL(file);
         newStagedList.push({
           id: `staged_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
@@ -317,10 +323,20 @@ export const PropertyForm: React.FC = () => {
       }
     }
 
-    if (newStagedList.length > 0) {
+    // Report invalid files if any
+    if (invalidFiles.length > 0) {
+      invalidFiles.forEach((inv) => {
+        warning(`Bỏ qua "${inv.name}"`, inv.reason);
+      });
+    }
+
+    if (newStagedList.length === 0) {
+      if (invalidFiles.length > 0) {
+        error('Không có ảnh nào được thêm', 'Vui lòng kiểm tra định dạng (JPG, PNG, WEBP) và dung lượng (<10MB).');
+      }
+    } else {
       setStagedImages((prev) => {
         const combined = [...prev, ...newStagedList];
-        // If no cover image yet, set the first one as cover
         const hasCover = combined.some((img) => img.isCover);
         if (!hasCover && combined.length > 0) {
           combined[0].isCover = true;
@@ -329,12 +345,12 @@ export const PropertyForm: React.FC = () => {
       });
 
       success(
-        `Đã thêm ${newStagedList.length} ảnh vào danh sách`,
-        'Ảnh đã được nén tối ưu, sẵn sàng tải lên Firebase Storage khi bấm Lưu.'
+        `Đã thêm ${newStagedList.length} ảnh xem trước`,
+        'Ảnh đã được nén tối ưu. Bấm "Lưu thay đổi / Tiếp nhận" để tải lên Firebase Storage.'
       );
     }
 
-    // Reset input value
+    // Reset input value after processing is done
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -391,6 +407,7 @@ export const PropertyForm: React.FC = () => {
         img.status === 'error' ? { ...img, status: 'pending', progress: 0, errorMessage: undefined } : img
       )
     );
+    info('Đã đặt lại trạng thái', 'Sẵn sàng thử lại tải lên các ảnh bị lỗi.');
   };
 
   // Form Validation
@@ -410,10 +427,7 @@ export const PropertyForm: React.FC = () => {
     return true;
   };
 
-  // Core Submit Handler with 3-Step Image Flow:
-  // Step 1: Validate form & duplicate check
-  // Step 2: Establish property ID (pre-create ID for Storage path)
-  // Step 3: Upload pending images to properties/{propertyId}/images/{fileName} -> Save metadata
+  // Core Submit Handler with 3-Step Image Flow and Promise.allSettled:
   const handleSave = async (bypassDuplicate = false) => {
     if (!validateForm()) return;
 
@@ -438,86 +452,137 @@ export const PropertyForm: React.FC = () => {
     const sequence = properties.length + 1;
     const propertyCode = formData.code || generatePropertyCode(formData.transactionType || 'SALE', sequence);
 
-    // 2. Upload pending images to Firebase Storage
-    const finalImageDetails: PropertyImageItem[] = [];
-    const finalImageUrls: string[] = [];
-    let hasUploadErrors = false;
+    // 2. Identify pending images needing upload
+    const currentStaged = [...stagedImages];
+    const pendingUploadIndices: number[] = [];
 
-    const updatedStaged = [...stagedImages];
-
-    for (let i = 0; i < updatedStaged.length; i++) {
-      const item = updatedStaged[i];
-
-      // If already uploaded previously
-      if (item.isExisting && item.status === 'success' && item.itemMetadata) {
-        finalImageDetails.push({
-          ...item.itemMetadata,
-          isCover: item.isCover,
-          sortOrder: i,
-        });
-        finalImageUrls.push(item.previewUrl);
-        continue;
+    currentStaged.forEach((item, idx) => {
+      if (!item.isExisting && item.file) {
+        pendingUploadIndices.push(idx);
       }
+    });
 
-      // If needs upload (pending or retry)
-      if (item.file) {
-        setUploadStatusText(`Đang tải ảnh ${i + 1}/${updatedStaged.length}: ${item.fileName}...`);
-        
-        // Update item state to uploading
-        updatedStaged[i] = { ...item, status: 'uploading', progress: 10 };
-        setStagedImages([...updatedStaged]);
+    if (pendingUploadIndices.length > 0) {
+      setUploadStatusText(`Đang tải lên ${pendingUploadIndices.length} ảnh lên Firebase Storage...`);
 
-        try {
-          const uploadedMeta = await uploadPropertyImageToStorage(item.file, propertyId, {
-            isCover: item.isCover,
-            sortOrder: i,
-            uploadedBy: currentUser?.fullName || currentUser?.email || 'Môi giới',
-            onProgress: (p) => {
-              updatedStaged[i] = { ...updatedStaged[i], progress: p };
-              setStagedImages([...updatedStaged]);
-            },
-          });
+      // Set items to uploading state
+      pendingUploadIndices.forEach((idx) => {
+        currentStaged[idx] = { ...currentStaged[idx], status: 'uploading', progress: 10 };
+      });
+      setStagedImages([...currentStaged]);
 
-          updatedStaged[i] = {
-            ...updatedStaged[i],
+      // Upload each pending image independently using Promise.allSettled
+      const uploadPromises = pendingUploadIndices.map((idx) => {
+        const item = currentStaged[idx];
+        return uploadPropertyImageToStorage(item.file!, propertyId, {
+          fileName: item.fileName,
+          isCover: item.isCover,
+          sortOrder: idx,
+          uploadedBy: currentUser?.fullName || currentUser?.email || 'Môi giới',
+          width: item.width,
+          height: item.height,
+          skipCompress: true,
+          onProgress: (p) => {
+            currentStaged[idx] = { ...currentStaged[idx], progress: p };
+            setStagedImages([...currentStaged]);
+          },
+        });
+      });
+
+      const settledResults = await Promise.allSettled(uploadPromises);
+
+      let uploadedCount = 0;
+      const failedList: { index: number; fileName: string; error: string }[] = [];
+
+      settledResults.forEach((res, i) => {
+        const originalIndex = pendingUploadIndices[i];
+        const item = currentStaged[originalIndex];
+
+        if (res.status === 'fulfilled') {
+          uploadedCount++;
+          const uploadedMeta = res.value;
+          currentStaged[originalIndex] = {
+            ...currentStaged[originalIndex],
             status: 'success',
             progress: 100,
             previewUrl: uploadedMeta.downloadURL,
             itemMetadata: uploadedMeta,
           };
-          setStagedImages([...updatedStaged]);
-
-          finalImageDetails.push(uploadedMeta);
-          finalImageUrls.push(uploadedMeta.downloadURL);
-        } catch (err: any) {
-          console.error(`Lỗi tải ảnh ${item.fileName}:`, err);
-          updatedStaged[i] = {
-            ...updatedStaged[i],
+        } else {
+          const errorReason = res.reason?.message || 'Lỗi kết nối Firebase Storage';
+          currentStaged[originalIndex] = {
+            ...currentStaged[originalIndex],
             status: 'error',
             progress: 0,
-            errorMessage: err.message || 'Lỗi tải ảnh lên Firebase Storage',
+            errorMessage: errorReason,
           };
-          setStagedImages([...updatedStaged]);
-          hasUploadErrors = true;
+          failedList.push({
+            index: originalIndex,
+            fileName: item.fileName,
+            error: errorReason,
+          });
         }
+      });
+
+      setStagedImages([...currentStaged]);
+
+      // NOTIFICATION LOGIC STRICTLY COMPLIANT WITH REQUIREMENTS:
+      const totalAttempted = pendingUploadIndices.length;
+
+      if (uploadedCount === 0) {
+        setIsUploading(false);
+        setUploadStatusText('');
+        error('Lỗi tải ảnh', 'Không có ảnh nào được tải lên. Vui lòng kiểm tra và thử lại.');
+        return;
+      }
+
+      if (uploadedCount > 0 && failedList.length > 0) {
+        setIsUploading(false);
+        setUploadStatusText('');
+        const failedNames = failedList.map((f) => f.fileName).join(', ');
+        warning(
+          'Tải ảnh hoàn tất một phần',
+          `Đã tải thành công ${uploadedCount}/${totalAttempted} ảnh. Có ${failedList.length} ảnh bị lỗi (${failedNames}).`
+        );
+        return;
+      }
+
+      if (uploadedCount === totalAttempted) {
+        success('Tải ảnh thành công', `Đã tải thành công ${uploadedCount}/${totalAttempted} ảnh lên Firebase Storage.`);
       }
     }
 
-    if (hasUploadErrors) {
-      setIsUploading(false);
-      setUploadStatusText('');
-      error(
-        'Tải ảnh chưa hoàn tất',
-        'Có ảnh không thể tải lên Firebase Storage. Vui lòng kiểm tra các ảnh bị đánh dấu lỗi và thử lại.'
-      );
-      return;
-    }
+    // 3. Collect genuine download URLs and metadata (Strictly exclude blob: or data:)
+    const finalImageDetails: PropertyImageItem[] = [];
+    const finalImageUrls: string[] = [];
+
+    currentStaged.forEach((item, idx) => {
+      if (item.status === 'success' && item.itemMetadata) {
+        finalImageDetails.push({
+          ...item.itemMetadata,
+          isCover: item.isCover,
+          sortOrder: idx,
+        });
+        if (item.itemMetadata.downloadURL && !item.itemMetadata.downloadURL.startsWith('blob:') && !item.itemMetadata.downloadURL.startsWith('data:')) {
+          finalImageUrls.push(item.itemMetadata.downloadURL);
+        }
+      } else if (item.isExisting && item.previewUrl && !item.previewUrl.startsWith('blob:') && !item.previewUrl.startsWith('data:')) {
+        finalImageUrls.push(item.previewUrl);
+        if (item.itemMetadata) {
+          finalImageDetails.push({
+            ...item.itemMetadata,
+            isCover: item.isCover,
+            sortOrder: idx,
+          });
+        }
+      }
+    });
 
     // Determine cover image URL
-    const coverItem = updatedStaged.find((s) => s.isCover);
-    const coverImageUrl = coverItem?.previewUrl || finalImageUrls[0] || '';
+    const coverItem = currentStaged.find((s) => s.isCover && s.status === 'success');
+    const coverImageUrl = coverItem?.itemMetadata?.downloadURL || finalImageUrls[0] || '';
 
-    // 3. Save Property document to Firestore / local state
+    // 4. Save Property document to Firestore / local state
     setUploadStatusText('Đang lưu thông tin BĐS...');
     try {
       const propertyPayload: Partial<Property> = {
@@ -531,11 +596,9 @@ export const PropertyForm: React.FC = () => {
 
       if (isEditMode && id) {
         await updateProperty(id, propertyPayload);
-        success('Cập nhật BĐS thành công', `Đã lưu các thay đổi cho mã ${propertyCode}.`);
         navigate(`/properties/${id}`);
       } else {
         const created = await addProperty(propertyPayload as any);
-        success('Tiếp nhận BĐS thành công', `Đã tạo nguồn hàng mới với mã ${created.code}.`);
         navigate(`/properties/${created.id}`);
       }
     } catch (err: any) {

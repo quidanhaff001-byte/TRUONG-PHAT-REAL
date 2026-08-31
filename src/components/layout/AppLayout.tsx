@@ -5,6 +5,7 @@ import { Navbar } from './Navbar';
 import { MobileNav } from './MobileNav';
 import { useAuth } from '../../context/AuthContext';
 import { Login } from '../../pages/Auth/Login';
+import { MustChangePasswordModal } from '../auth/MustChangePasswordModal';
 
 export const AppLayout: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -38,6 +39,8 @@ export const AppLayout: React.FC = () => {
         <main className="flex-1 p-4 sm:p-6 pb-24 lg:pb-10 max-w-7xl w-full mx-auto">
           <Outlet />
         </main>
+
+        <MustChangePasswordModal />
 
         <MobileNav onOpenCreateProperty={() => navigate('/properties/new')} />
       </div>

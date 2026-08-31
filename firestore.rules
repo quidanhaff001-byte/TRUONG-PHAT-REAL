@@ -2,22 +2,23 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Helper functions for Role-Based Access Control (RBAC)
+    // Helper functions for Role-Based Access Control (RBAC) & Eight Pillars of Security
     function isSignedIn() {
       return request.auth != null;
     }
 
-    function getUserRole() {
-      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
-        : 'AGENT';
+    function getUserClaimRole() {
+      return request.auth.token.role;
     }
 
     // 1. Quản trị viên (ADMIN) - Toàn quyền hệ thống
     function isAdmin() {
       return isSignedIn() && (
         request.auth.token.email == 'quidanh.aff001@gmail.com' ||
-        getUserRole() == 'ADMIN'
+        getUserClaimRole() == 'ADMIN' ||
+        request.auth.token.admin == true ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN')
       );
     }
 
@@ -25,7 +26,9 @@ service cloud.firestore {
     function isTeamLeader() {
       return isSignedIn() && (
         isAdmin() ||
-        getUserRole() == 'TEAM_LEADER'
+        getUserClaimRole() == 'TEAM_LEADER' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'TEAM_LEADER')
       );
     }
 
@@ -36,72 +39,111 @@ service cloud.firestore {
 
     // Users Collection (Hồ sơ nhân sự)
     match /users/{userId} {
-      allow read, write: if true;
+      // Any authenticated user can read directory for team lookup & assignments
+      allow read: if isSignedIn();
+      // Admin has full write access
+      allow create, delete: if isAdmin();
+      // Users can update their own non-role profile fields, or Admin can update anything
+      allow update: if isAdmin() || (
+        isSignedIn() && request.auth.uid == userId &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'status', 'lockReason'])
+      );
     }
 
     // Teams Collection (Phòng ban & Đội nhóm)
     match /teams/{teamId} {
-      allow read, write: if true;
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
 
     // Properties Collection (Nguồn hàng Bất Động Sản)
     match /properties/{propertyId} {
-      allow read, write: if true;
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        isTeamLeader() ||
+        resource.data.createdBy == request.auth.uid ||
+        resource.data.assignedAgentId == request.auth.uid
+      );
+      allow delete: if isAdmin();
     }
 
     // Customers Collection (Khách hàng & Nhu cầu)
     match /customers/{customerId} {
-      allow read, write: if true;
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        isTeamLeader() ||
+        resource.data.createdBy == request.auth.uid ||
+        resource.data.assignedAgentId == request.auth.uid
+      );
+      allow delete: if isAdmin();
     }
 
     // Appointments (Lịch hẹn dẫn khách)
     match /appointments/{appointmentId} {
-      allow read, write: if true;
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isAdmin() || isTeamLeader();
     }
 
     // Property Matches (Ghép nguồn hàng & khách hàng)
     match /propertyMatches/{matchId} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Transactions / Deals (Giao dịch Mua bán & Sang nhượng)
     match /transactions/{transactionId} {
-      allow read, write: if true;
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isAdmin();
     }
 
     // Rental Deals (Giao dịch cho thuê)
     match /rentalDeals/{dealId} {
-      allow read, write: if true;
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isAdmin();
     }
 
     // Rental Contracts (Hợp đồng thuê chính thức)
     match /rentalContracts/{contractId} {
-      allow read, write: if true;
+      allow read: if isSignedIn();
+      allow create, update: if isTeamLeader();
+      allow delete: if isAdmin();
     }
 
     // Rental Payments (Kỳ thanh toán tiền thuê)
     match /rentalPayments/{paymentId} {
-      allow read, write: if true;
+      allow read, write: if isTeamLeader();
     }
 
     // Commissions (Quản lý & Phân chia hoa hồng)
     match /commissions/{commissionId} {
-      allow read, write: if true;
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || isTeamLeader();
     }
 
     // Notifications (Thông báo hệ thống)
     match /notifications/{notifId} {
-      allow read, write: if true;
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isAdmin();
     }
 
-    // Audit logs (Nhật ký thao tác)
+    // Audit logs (Nhật ký thao tác - Immutable for clients)
     match /auditLogs/{logId} {
-      allow read, write: if true;
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if false; // Logs cannot be altered or deleted by clients
     }
 
     // System Settings (Logo, Branding & Company Config)
     match /settings/{settingId} {
-      allow read, write: if true;
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
 
     // System Health & Pings
