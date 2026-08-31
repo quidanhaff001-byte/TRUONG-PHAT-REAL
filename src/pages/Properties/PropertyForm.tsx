@@ -91,7 +91,7 @@ export const PropertyForm: React.FC = () => {
   const isEditMode = Boolean(id);
   const navigate = useNavigate();
 
-  const { properties, addProperty, updateProperty, checkDuplicateProperty, users, teams } = useData();
+  const { properties, addProperty, updateProperty, checkDuplicateProperty, users, teams, locations } = useData();
   const { currentUser, canEditProperty, isAdmin } = useAuth();
   const { success, error, warning, info } = useToast();
 
@@ -120,14 +120,17 @@ export const PropertyForm: React.FC = () => {
     propertyType: 'Nhà phố',
     status: 'Đang bán',
     
-    // Address
-    city: 'Hồ Chí Minh',
-    district: 'Quận 1',
-    ward: 'Phường Bến Nghé',
+    // Address & Geography
+    city: 'An Giang',
+    district: 'Thành phố Rạch Giá (cũ)',
+    ward: 'Phường Rạch Giá',
     street: '',
     houseNumber: '',
     address: '',
     mapsUrl: '',
+    formerProvince: 'KIEN_GIANG_OLD',
+    formerDistrict: 'Thành phố Rạch Giá',
+    locationId: 'loc_rach_gia_01',
 
     // Technical specs
     landArea: 80,
@@ -741,10 +744,64 @@ export const PropertyForm: React.FC = () => {
 
         {/* SECTION 2: Location & Address */}
         <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
-          <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2 border-b border-slate-100 pb-3">
-            <MapPin className="w-4 h-4 text-amber-600" />
-            2. Vị trí & Địa chỉ chi tiết
-          </h2>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+            <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+              <MapPin className="w-4 h-4 text-amber-600" />
+              2. Vị trí & Địa bàn Tỉnh An Giang mới (bao gồm Kiên Giang cũ)
+            </h2>
+            <span className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full font-medium">
+              Phạm vi hoạt động: Toàn tỉnh An Giang mới
+            </span>
+          </div>
+
+          {/* Quick Location Preset Selector */}
+          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+            <label className="block text-xs font-bold text-slate-800">
+              Chọn nhanh địa bàn hành chính chuẩn:
+            </label>
+            <select
+              value={formData.locationId || ''}
+              onChange={(e) => {
+                const selectedLoc = locations.find((l) => l.id === e.target.value);
+                if (selectedLoc) {
+                  const updatedWard = selectedLoc.currentName;
+                  const updatedDist = `${selectedLoc.formerDistrictName} (cũ)`;
+                  const parts = [formData.houseNumber, formData.street, updatedWard, updatedDist, 'Tỉnh An Giang'].filter(Boolean);
+                  setFormData({
+                    ...formData,
+                    locationId: selectedLoc.id,
+                    city: 'An Giang',
+                    district: updatedDist,
+                    ward: updatedWard,
+                    formerDistrict: selectedLoc.formerDistrictName,
+                    formerProvince: selectedLoc.formerProvince,
+                    address: parts.join(', '),
+                  });
+                }
+              }}
+              className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 focus:ring-2 focus:ring-amber-500/50"
+            >
+              <option value="">-- Chọn đơn vị hành chính (Phường / Xã / Đặc khu) --</option>
+              <optgroup label="📍 Khu vực Kiên Giang cũ (Rạch Giá, Phú Quốc, Hà Tiên, An Minh...)">
+                {locations
+                  .filter((l) => l.formerProvince === 'KIEN_GIANG_OLD' && l.active !== false)
+                  .map((loc) => (
+                    <option key={loc.id} value={loc.id}>
+                      {loc.currentName} — {loc.formerDistrictName}
+                    </option>
+                  ))}
+              </optgroup>
+              <optgroup label="📍 Khu vực An Giang cũ (Long Xuyên, Châu Đốc, Thoại Sơn...)">
+                {locations
+                  .filter((l) => l.formerProvince === 'AN_GIANG_OLD' && l.active !== false)
+                  .map((loc) => (
+                    <option key={loc.id} value={loc.id}>
+                      {loc.currentName} — {loc.formerDistrictName}
+                    </option>
+                  ))}
+              </optgroup>
+            </select>
+          </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
             <div>
@@ -761,34 +818,34 @@ export const PropertyForm: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Quận / Huyện *</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Quận / Huyện / TP cũ *</label>
               <input
                 type="text"
                 value={formData.district}
                 onChange={(e) => handleAddressFieldChange('district', e.target.value)}
-                placeholder="VD: Quận 1, Long Xuyên..."
+                placeholder="VD: Thành phố Rạch Giá, Huyện An Minh..."
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Phường / Xã</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Phường / Xã / Thị trấn</label>
               <input
                 type="text"
                 value={formData.ward}
                 onChange={(e) => handleAddressFieldChange('ward', e.target.value)}
-                placeholder="VD: Phường Bến Nghé"
+                placeholder="VD: Phường Rạch Giá, Thị trấn Thứ 11..."
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Tên đường</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Tên đường / Tuyến Quốc lộ</label>
               <input
                 type="text"
                 value={formData.street}
                 onChange={(e) => handleAddressFieldChange('street', e.target.value)}
-                placeholder="VD: Nguyễn Huệ, Lê Lợi..."
+                placeholder="VD: Nguyễn Trung Trực, Quốc lộ 63..."
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
               />
             </div>
@@ -796,12 +853,12 @@ export const PropertyForm: React.FC = () => {
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Số nhà / Số thửa</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Số nhà / Thửa đất / Ấp</label>
               <input
                 type="text"
                 value={formData.houseNumber}
                 onChange={(e) => handleAddressFieldChange('houseNumber', e.target.value)}
-                placeholder="VD: 128/4A"
+                placeholder="VD: Số 434A, Ấp 2..."
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
               />
             </div>

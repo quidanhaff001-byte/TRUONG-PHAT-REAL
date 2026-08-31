@@ -18,6 +18,7 @@ import {
   AuditLog,
   Notification,
   SystemSettings,
+  LocationItem,
 } from '../types';
 import {
   SAMPLE_PROPERTIES,
@@ -35,6 +36,7 @@ import {
   SAMPLE_NOTIFICATIONS,
   DEFAULT_SYSTEM_SETTINGS,
 } from '../data/sampleData';
+import { MASTER_LOCATIONS } from '../data/locationsData';
 import { useAuth } from './AuthContext';
 import { useToast } from './ToastContext';
 import { generatePropertyCode } from '../utils/formatters';
@@ -173,6 +175,12 @@ interface DataContextType {
   updateSystemSettings: (data: Partial<SystemSettings>) => Promise<void>;
   restoreDefaultLogo: () => Promise<void>;
 
+  // Locations (Địa bàn hoạt động)
+  locations: LocationItem[];
+  addLocation: (locationData: Omit<LocationItem, 'id'>) => Promise<LocationItem>;
+  updateLocation: (id: string, data: Partial<LocationItem>) => Promise<void>;
+  deleteLocation: (id: string) => Promise<void>;
+
   // Reset / Seed
   seedInitialDataToFirestore: (forceClean?: boolean) => Promise<void>;
   resetDemoData: () => void;
@@ -216,6 +224,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [commissions, setCommissions] = useState<Commission[]>(SAMPLE_COMMISSIONS);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(SAMPLE_AUDIT_LOGS);
   const [notifications, setNotifications] = useState<Notification[]>(SAMPLE_NOTIFICATIONS);
+  const [locations, setLocations] = useState<LocationItem[]>(MASTER_LOCATIONS);
 
   const [systemSettings, setSystemSettings] = useState<SystemSettings>(() => {
     try {
@@ -346,6 +355,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       for (const cm of SAMPLE_COMMISSIONS) await setDoc(doc(db, 'commissions', cm.id), cm, { merge: true });
       for (const lg of SAMPLE_AUDIT_LOGS) await setDoc(doc(db, 'auditLogs', lg.id), lg, { merge: true });
       for (const nf of SAMPLE_NOTIFICATIONS) await setDoc(doc(db, 'notifications', nf.id), nf, { merge: true });
+      for (const loc of MASTER_LOCATIONS) await setDoc(doc(db, 'locations', loc.id), loc, { merge: true });
 
       success('Đã đồng bộ toàn bộ cơ sở dữ liệu lên Cloud Firestore');
     } catch (err: any) {
@@ -520,6 +530,18 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       (err) => console.warn('Snapshot listener notice on notifications:', err?.message || err)
     );
 
+    const unsubLocations = onSnapshot(
+      collection(db, 'locations'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as LocationItem));
+          loaded.sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
+          setLocations(loaded);
+        }
+      },
+      (err) => console.warn('Snapshot listener notice on locations:', err?.message || err)
+    );
+
     return () => {
       unsubSettings();
       unsubProps();
@@ -535,6 +557,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       unsubCommissions();
       unsubAuditLogs();
       unsubNotifs();
+      unsubLocations();
     };
   }, []);
 
@@ -1871,6 +1894,75 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     await updateSystemSettings({ logoUrl: '' });
   };
 
+  // Location Actions
+  const addLocation = async (locationData: Omit<LocationItem, 'id'>): Promise<LocationItem> => {
+    const newId = `loc_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+    const newLocation: LocationItem = {
+      ...locationData,
+      id: newId,
+    };
+
+    setLocations((prev) => [...prev, newLocation]);
+    if (isFirebaseConfigured) {
+      try {
+        await setDoc(doc(db, 'locations', newId), newLocation);
+      } catch (err: any) {
+        console.warn('Add location error:', err.message);
+      }
+    }
+
+    await addAuditLog({
+      action: 'SETTINGS_CHANGE',
+      module: 'SETTINGS',
+      description: `Thêm địa bàn mới: ${newLocation.currentName} (${newLocation.formerDistrictName})`,
+      level: 'INFO',
+    });
+
+    success('Thêm địa bàn thành công', `Đã thêm ${newLocation.currentName} vào hệ thống.`);
+    return newLocation;
+  };
+
+  const updateLocation = async (id: string, data: Partial<LocationItem>): Promise<void> => {
+    setLocations((prev) => prev.map((loc) => (loc.id === id ? { ...loc, ...data } : loc)));
+    if (isFirebaseConfigured) {
+      try {
+        await updateDoc(doc(db, 'locations', id), data);
+      } catch (err: any) {
+        console.warn('Update location error:', err.message);
+      }
+    }
+
+    await addAuditLog({
+      action: 'SETTINGS_CHANGE',
+      module: 'SETTINGS',
+      description: `Cập nhật thông tin địa bàn mã: ${id}`,
+      level: 'INFO',
+    });
+
+    success('Cập nhật địa bàn thành công');
+  };
+
+  const deleteLocation = async (id: string): Promise<void> => {
+    const targetLoc = locations.find((l) => l.id === id);
+    setLocations((prev) => prev.filter((loc) => loc.id !== id));
+    if (isFirebaseConfigured) {
+      try {
+        await deleteDoc(doc(db, 'locations', id));
+      } catch (err: any) {
+        console.warn('Delete location error:', err.message);
+      }
+    }
+
+    await addAuditLog({
+      action: 'SETTINGS_CHANGE',
+      module: 'SETTINGS',
+      description: `Xóa địa bàn: ${targetLoc?.currentName || id}`,
+      level: 'WARNING',
+    });
+
+    info('Đã xóa địa bàn khỏi danh sách');
+  };
+
   // Filtered Properties for standard views
   const filteredProperties = properties.filter((prop) => {
     if (prop.isDeleted) return false;
@@ -2025,6 +2117,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         updateSystemSettings,
         restoreDefaultLogo,
+
+        locations,
+        addLocation,
+        updateLocation,
+        deleteLocation,
 
         seedInitialDataToFirestore,
         resetDemoData,

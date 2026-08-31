@@ -73,7 +73,7 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
   customer,
   onSaved,
 }) => {
-  const { users, teams, addCustomer, updateCustomer, checkDuplicateCustomerPhone } = useData();
+  const { users, teams, addCustomer, updateCustomer, checkDuplicateCustomerPhone, locations } = useData();
   const { currentUser, isAdmin, isTeamLeader } = useAuth();
 
   const isEdit = !!customer;
@@ -515,24 +515,25 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
             {/* Areas Selection */}
             <div>
               <div className="text-xs font-semibold text-slate-700 mb-2 flex items-center justify-between">
-                <span>Khu vực / Quận mong muốn:</span>
+                <span>Địa bàn / Khu vực mong muốn (An Giang & Kiên Giang cũ):</span>
                 <span className="text-[11px] text-slate-400 font-normal">Nhấn để chọn nhanh hoặc nhập thêm</span>
               </div>
               <div className="flex flex-wrap gap-1.5 mb-2">
-                {POPULAR_AREAS.map((area) => {
-                  const isSelected = areas.includes(area);
+                {locations.filter((l) => l.active !== false).slice(0, 15).map((loc) => {
+                  const areaLabel = `${loc.currentName} (${loc.formerDistrictName})`;
+                  const isSelected = areas.includes(areaLabel) || areas.includes(loc.currentName);
                   return (
                     <button
-                      key={area}
+                      key={loc.id}
                       type="button"
-                      onClick={() => toggleArea(area)}
-                      className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${
+                      onClick={() => toggleArea(areaLabel)}
+                      className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors cursor-pointer ${
                         isSelected
                           ? 'bg-amber-100 text-amber-900 border-amber-300 font-bold'
                           : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                       }`}
                     >
-                      {area}
+                      {loc.currentName}
                     </button>
                   );
                 })}
@@ -545,7 +546,7 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
                   value={customAreaInput}
                   onChange={(e) => setCustomAreaInput(e.target.value)}
                   onKeyDown={handleAddCustomArea}
-                  placeholder="Nhập thêm khu vực khác (vd: Dĩ An, Long Thành) và gõ Enter..."
+                  placeholder="Nhập thêm khu vực / ấp / xã khác và gõ Enter..."
                   className="flex-1 px-3.5 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:border-slate-900 ring-slate-200"
                 />
               </div>

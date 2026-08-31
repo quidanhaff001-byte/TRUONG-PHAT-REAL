@@ -137,6 +137,19 @@ export interface PropertyImageItem {
   uploadedBy: string;
 }
 
+export interface LocationItem {
+  id: string;
+  provinceCode: 'AN_GIANG_NEW';
+  provinceName: 'An Giang';
+  formerProvince: 'AN_GIANG_OLD' | 'KIEN_GIANG_OLD';
+  administrativeType: 'WARD' | 'COMMUNE' | 'SPECIAL_ZONE' | 'CITY' | 'DISTRICT';
+  currentName: string;
+  formerDistrictName: string;
+  aliases: string[];
+  active: boolean;
+  displayOrder: number;
+}
+
 export interface Property {
   id: string;
   code: string;
@@ -144,13 +157,19 @@ export interface Property {
   transactionType: TransactionType;
   propertyType: PropertyType;
   
-  // Location
+  // Location Standard (New An Giang Province)
   city: string;
   district: string;
   ward?: string;
   street?: string;
   houseNumber?: string;
   address: string;
+  currentProvince?: string;
+  currentWardCommune?: string;
+  formerProvince?: 'Kiên Giang' | 'An Giang';
+  formerDistrictCity?: string;
+  addressText?: string;
+  locationId?: string;
   mapsUrl?: string;
   googleMapsUrl?: string;
   latitude?: number;
@@ -283,7 +302,9 @@ export interface Property {
   transferHandoverDate?: string;
   transferConfidentialNotes?: string;
   
-  // System tracking
+  // System tracking & Migration
+  migrationStatus?: 'COMPLETED' | 'NEEDS_REVIEW' | 'PENDING';
+  migrationNote?: string;
   status: PropertyStatus;
   isDeleted?: boolean;
   deletedAt?: string;
@@ -878,13 +899,23 @@ export interface Notification {
 
 export interface SystemSettings {
   id: string;
-  companyName: string;
+  parentCompanyLegalName: string; // CÔNG TY TNHH TRƯỜNG PHÁT
+  parentCompanyInternationalName: string; // TRUONGPHAT COMPANY LIMITED
+  parentCompanyAbbreviation: string; // TRUPHACO
+  taxId: string; // 1700442767
+  legalRepresentative: string; // Vương Đức Trường
+  brandName: string; // TRƯỜNG PHÁT REAL
+  companyName: string; // TRƯỜNG PHÁT REAL
   companySlogan: string;
   logoUrl?: string;
-  hotline: string;
-  address: string;
-  website?: string;
-  email?: string;
+  phone: string; // 0297 381 0942
+  hotline: string; // 0888 29 28 29
+  address: string; // Số 434A Nguyễn Trung Trực, phường Rạch Giá, tỉnh An Giang
+  website: string; // https://truongphatreal.vn/
+  email: string; // info.truongphatcompany@gmail.com
+  defaultProvince: string; // An Giang
+  operatingScope: string; // Toàn tỉnh An Giang mới (bao gồm Kiên Giang cũ)
+  legalFooterText: string; // “TRƯỜNG PHÁT REAL – Hệ thống quản lý bất động sản thuộc Công ty TNHH Trường Phát”
   updatedAt?: string;
   updatedBy?: string;
 }
