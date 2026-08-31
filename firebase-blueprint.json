@@ -276,6 +276,21 @@
         "enableAutoDuplicateCheck": { "type": "boolean" },
         "enableAgentPhoneMasking": { "type": "boolean" }
       }
+    },
+    "LocationItem": {
+      "title": "LocationItem",
+      "description": "Danh mục địa bàn hành chính Tỉnh An Giang mới (bao gồm Kiên Giang cũ)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "code": { "type": "string", "maxLength": 50 },
+        "currentName": { "type": "string", "maxLength": 100 },
+        "formerDistrictName": { "type": "string", "maxLength": 100 },
+        "formerProvince": { "type": "string", "enum": ["KIEN_GIANG_OLD", "AN_GIANG_OLD"] },
+        "type": { "type": "string", "maxLength": 30 },
+        "active": { "type": "boolean" }
+      },
+      "required": ["id", "code", "currentName", "formerDistrictName", "formerProvince"]
     }
   },
   "firestore": {
@@ -334,6 +349,10 @@
     "/settings/{settingId}": {
       "schema": "SystemSettings",
       "description": "Cấu hình thương hiệu và cài đặt hệ thống"
+    },
+    "/locations/{locationId}": {
+      "schema": "LocationItem",
+      "description": "Danh mục địa bàn hành chính tỉnh An Giang mới"
     }
   }
 }

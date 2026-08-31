@@ -1,12 +1,12 @@
 {
-  "projectId": "airy-cogency-503707-p1",
-  "appId": "1:976579847957:web:1a00174ce0f11206316b1c",
-  "apiKey": "AIzaSyBMCNH2O-5UvzJde_W2V-ETv0eFIf9i-KQ",
-  "authDomain": "airy-cogency-503707-p1.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-truongphatrealqu-ea18f189-741a-4104-84a3-5826cfc407a8",
-  "storageBucket": "airy-cogency-503707-p1.firebasestorage.app",
-  "messagingSenderId": "976579847957",
+  "projectId": "truong-phat-6087e",
+  "appId": "1:712564614901:web:a45311bd98892fed7047bc",
+  "apiKey": "AIzaSyBHK6n_3s19LWkg07JaQbHpU0QZBsdHpzQ",
+  "authDomain": "truong-phat-6087e.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "truong-phat-6087e.firebasestorage.app",
+  "messagingSenderId": "712564614901",
   "measurementId": "",
-  "oAuthClientId": "976579847957-fkih075b07o39lpcpc50jamon4i29kk0.apps.googleusercontent.com",
+  "oAuthClientId": "",
   "recaptchaSiteKey": ""
 }

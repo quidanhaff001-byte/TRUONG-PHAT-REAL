@@ -31,7 +31,7 @@ export const isStorageConfigured = Boolean(
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
 export const auth = getAuth(app);
-const databaseId = (firebaseAppletConfig as any).firestoreDatabaseId;
+const databaseId = import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || (firebaseAppletConfig as any).firestoreDatabaseId;
 export const db = databaseId && databaseId !== '(default)' 
   ? getFirestore(app, databaseId) 
   : getFirestore(app);

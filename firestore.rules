@@ -146,6 +146,12 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Locations (Danh mục địa bàn hoạt động Tỉnh An Giang mới)
+    match /locations/{locationId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
     // System Health & Pings
     match /system_health/{id} {
       allow read, write: if true;
