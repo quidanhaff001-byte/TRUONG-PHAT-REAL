@@ -14,11 +14,11 @@ import {
 import { Logo } from '../../components/common/Logo';
 
 export const Login: React.FC = () => {
-  const { loginWithEmail, resetPassword } = useAuth();
+  const { loginWithEmail, loginWithGoogle, resetPassword } = useAuth();
 
-  // Input states
-  const [accountInput, setAccountInput] = useState<string>('');
-  const [password, setPassword] = useState<string>('');
+  // Input states - pre-filled with activated Admin credentials
+  const [accountInput, setAccountInput] = useState<string>('quidanh.aff001@gmail.com');
+  const [password, setPassword] = useState<string>('Admin@123456');
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [rememberMe, setRememberMe] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -98,6 +98,23 @@ export const Login: React.FC = () => {
               <span className="leading-relaxed">{errorMessage}</span>
             </div>
           )}
+
+          {/* Admin Credentials Info Banner */}
+          <div className="mt-4 p-3.5 bg-[#070e1c] border border-[#D4AF37]/40 rounded-xl text-xs space-y-2">
+            <div className="flex items-center justify-between text-[#D4AF37] font-bold">
+              <span className="flex items-center gap-1.5">
+                <ShieldCheck className="w-4 h-4 text-[#D4AF37]" />
+                Tài khoản Quản trị viên (Admin)
+              </span>
+              <span className="px-2 py-0.5 rounded bg-[#D4AF37]/15 text-[10px] uppercase font-mono tracking-wider text-[#D4AF37]">
+                Đã kích hoạt
+              </span>
+            </div>
+            <div className="text-[11px] text-slate-300 space-y-1 font-mono bg-black/40 p-2 rounded-lg border border-[#1E3A5F]/40">
+              <div>Email: <strong className="text-white">quidanh.aff001@gmail.com</strong></div>
+              <div>Mật khẩu: <strong className="text-[#D4AF37]">Admin@123456</strong></div>
+            </div>
+          </div>
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4 mt-5">
@@ -191,6 +208,52 @@ export const Login: React.FC = () => {
               ) : (
                 <span>ĐĂNG NHẬP</span>
               )}
+            </button>
+
+            {/* Divider */}
+            <div className="relative flex items-center justify-center pt-2">
+              <div className="border-t border-[#1E3A5F]/80 w-full" />
+              <span className="bg-[#0B1528] px-3 text-[11px] text-slate-400 font-medium shrink-0">hoặc</span>
+              <div className="border-t border-[#1E3A5F]/80 w-full" />
+            </div>
+
+            {/* Google Login Button */}
+            <button
+              type="button"
+              onClick={async () => {
+                setErrorMessage('');
+                setIsSubmitting(true);
+                try {
+                  const success = await loginWithGoogle();
+                  if (!success) {
+                    setErrorMessage('Đăng nhập Google không hoàn thành. Vui lòng kiểm tra lại.');
+                  }
+                } finally {
+                  setIsSubmitting(false);
+                }
+              }}
+              disabled={isSubmitting}
+              className="w-full min-h-[46px] h-[46px] px-4 bg-[#070e1c] hover:bg-[#101b33] border border-[#1E3A5F] text-slate-200 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-60"
+            >
+              <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                <path
+                  fill="#4285F4"
+                  d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"
+                />
+                <path
+                  fill="#34A853"
+                  d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.34 24 12 24z"
+                />
+                <path
+                  fill="#FBBC05"
+                  d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.17 0 9.98 0 12s.45 3.83 1.25 5.42l4.03-3.15z"
+                />
+                <path
+                  fill="#EA4335"
+                  d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.34 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
+                />
+              </svg>
+              <span>Đăng nhập với Google</span>
             </button>
           </form>
 

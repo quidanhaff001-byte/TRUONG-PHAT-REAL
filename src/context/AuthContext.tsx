@@ -11,7 +11,7 @@ import {
   EmailAuthProvider,
   reauthenticateWithCredential,
 } from 'firebase/auth';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { useToast } from './ToastContext';
 
 interface AuthContextType {
@@ -54,8 +54,28 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const userDocRef = doc(db, 'users', fbUser.uid);
       const userSnap = await getDoc(userDocRef);
 
-      // Requirement 9: Nếu không có users/{uid} -> đăng xuất ngay
+      // Requirement 9: Nếu không có users/{uid} -> kiểm tra tài khoản Admin gốc hoặc đăng xuất
       if (!userSnap.exists()) {
+        if (fbUser.email === 'quidanh.aff001@gmail.com') {
+          const adminDoc: User = {
+            id: fbUser.uid,
+            uid: fbUser.uid,
+            employeeCode: 'ADMIN-001',
+            fullName: fbUser.displayName || 'Nguyễn Văn Quản Trị',
+            email: 'quidanh.aff001@gmail.com',
+            phone: '0919 414 884',
+            role: 'ADMIN',
+            status: 'ACTIVE',
+            startDate: '2022-01-01',
+            notes: 'Quản trị viên toàn hệ thống BDS Trường Phát Real - Chi nhánh An Giang',
+            createdAt: new Date().toISOString(),
+            lastLoginAt: new Date().toISOString(),
+          };
+          await setDoc(userDocRef, adminDoc, { merge: true });
+          setCurrentUser(adminDoc);
+          return adminDoc;
+        }
+
         console.warn(`Tài khoản ${fbUser.uid} (${fbUser.email}) chưa có hồ sơ users/{uid} trên Firestore`);
         await signOut(auth);
         setCurrentUser(null);
