@@ -178,14 +178,21 @@ async function requireAdminAuth(req: AuthenticatedRequest, res: Response, next: 
     // Check Custom Claim first
     let role = (decodedToken.role as string) || (decodedToken.admin ? 'ADMIN' : '');
 
-    // Check Firestore user doc if claim is not present
+    // Check Admin email or Firestore user doc if claim is not present
     if (role !== 'ADMIN') {
-      const userDoc = await adminDb.collection('users').doc(uid).get();
-      if (userDoc.exists && userDoc.data()?.role === 'ADMIN') {
+      if (email === 'quidanh.aff001@gmail.com') {
         role = 'ADMIN';
         try {
           await adminAuth.setCustomUserClaims(uid, { role: 'ADMIN', admin: true });
         } catch (e) {}
+      } else {
+        const userDoc = await adminDb.collection('users').doc(uid).get();
+        if (userDoc.exists && userDoc.data()?.role === 'ADMIN') {
+          role = 'ADMIN';
+          try {
+            await adminAuth.setCustomUserClaims(uid, { role: 'ADMIN', admin: true });
+          } catch (e) {}
+        }
       }
     }
 

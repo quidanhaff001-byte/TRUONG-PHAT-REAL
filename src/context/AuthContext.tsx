@@ -54,8 +54,28 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const userDocRef = doc(db, 'users', fbUser.uid);
       const userSnap = await getDoc(userDocRef);
 
-      // Requirement 9: Nếu không có users/{uid} -> đăng xuất ngay
+      // Requirement 9: Nếu không có users/{uid} -> tự động thiết lập cho Quản trị viên hệ thống hoặc đăng xuất
       if (!userSnap.exists()) {
+        if (fbUser.email === 'quidanh.aff001@gmail.com') {
+          const adminDoc: User = {
+            id: fbUser.uid,
+            uid: fbUser.uid,
+            employeeCode: 'ADMIN-001',
+            fullName: fbUser.displayName || 'Quản Trị Viên Hệ Thống',
+            email: 'quidanh.aff001@gmail.com',
+            phone: '0919 414 884',
+            role: 'ADMIN',
+            status: 'ACTIVE',
+            startDate: '2022-01-01',
+            notes: 'Quản trị viên toàn hệ thống BDS Trường Phát Real - Chi nhánh An Giang',
+            createdAt: new Date().toISOString(),
+            lastLoginAt: new Date().toISOString(),
+          };
+          await setDoc(userDocRef, adminDoc, { merge: true });
+          setCurrentUser(adminDoc);
+          return adminDoc;
+        }
+
         console.warn(`Tài khoản ${fbUser.uid} chưa có hồ sơ users/{uid} trên Firestore`);
         await signOut(auth);
         setCurrentUser(null);
@@ -76,9 +96,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return null;
       }
 
+      const isSystemAdmin =
+        fbUser.email === 'quidanh.aff001@gmail.com' ||
+        firestoreData.role === 'ADMIN';
+
       // Requirement 9: Kiểm tra role: Nếu không có role hợp lệ -> đăng xuất ngay
       const validRoles: UserRole[] = ['ADMIN', 'TEAM_LEADER', 'AGENT'];
-      if (!firestoreData.role || !validRoles.includes(firestoreData.role)) {
+      const effectiveRole: UserRole = isSystemAdmin ? 'ADMIN' : firestoreData.role;
+
+      if (!effectiveRole || !validRoles.includes(effectiveRole)) {
         await signOut(auth);
         setCurrentUser(null);
         error('Phân quyền không hợp lệ', 'Tài khoản chưa được phân quyền vai trò hợp lệ trong hệ thống.');
@@ -89,7 +115,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ...firestoreData,
         id: fbUser.uid,
         uid: fbUser.uid,
-        role: firestoreData.role,
+        role: effectiveRole,
         email: fbUser.email || firestoreData.email,
         lastLoginAt: new Date().toISOString(),
       };
@@ -324,7 +350,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     error('Tính năng bị khóa', 'Cơ chế tài khoản mẫu đã bị vô hiệu hóa.');
   };
 
-  const isAdmin = currentUser?.role === 'ADMIN';
+  const isAdmin = currentUser?.role === 'ADMIN' || currentUser?.email === 'quidanh.aff001@gmail.com';
   const isTeamLeader = currentUser?.role === 'TEAM_LEADER' || isAdmin;
   const isAgent = currentUser?.role === 'AGENT';
   const mustChangePassword = Boolean(currentUser?.mustChangePassword);

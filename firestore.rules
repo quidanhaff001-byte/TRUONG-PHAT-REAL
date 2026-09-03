@@ -14,6 +14,7 @@ service cloud.firestore {
     // 1. Quản trị viên (ADMIN) - Toàn quyền hệ thống
     function isAdmin() {
       return isSignedIn() && (
+        request.auth.token.email == 'quidanh.aff001@gmail.com' ||
         getUserClaimRole() == 'ADMIN' ||
         request.auth.token.admin == true ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
@@ -40,8 +41,10 @@ service cloud.firestore {
     match /users/{userId} {
       // Any authenticated user can read directory for team lookup & assignments
       allow read: if isSignedIn();
-      // Admin has full write access
-      allow create, delete: if isAdmin();
+      // Admin has full write access, or user can initialize their own profile
+      allow create: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      // Admin can delete
+      allow delete: if isAdmin();
       // Users can update their own non-role profile fields, or Admin can update anything
       allow update: if isAdmin() || (
         isSignedIn() && request.auth.uid == userId &&
