@@ -104,19 +104,19 @@ export const Login: React.FC = () => {
             {/* Account / Email Input */}
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                Tài khoản đăng nhập <span className="text-rose-400">*</span>
+                Email đăng nhập <span className="text-rose-400">*</span>
               </label>
               <div className="relative">
                 <UserIcon className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
-                  type="text"
+                  type="email"
                   autoComplete="username"
                   value={accountInput}
                   onChange={(e) => {
                     setAccountInput(e.target.value);
                     if (errorMessage) setErrorMessage('');
                   }}
-                  placeholder="Nhập email hoặc mã nhân viên"
+                  placeholder="Nhập email đã đăng ký (vd: email@truongphatreal.vn)"
                   className="w-full min-h-[48px] h-12 pl-10 pr-4 bg-[#070e1c] border border-[#1E3A5F] rounded-xl text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-[#D4AF37] focus:ring-1 focus:ring-[#D4AF37]/50 transition-all"
                 />
               </div>

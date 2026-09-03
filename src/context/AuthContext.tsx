@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User, UserRole } from '../types';
-import { SAMPLE_USERS } from '../data/sampleData';
 import { auth, db, isFirebaseConfigured, googleProvider } from '../config/firebase';
 import {
   signInWithEmailAndPassword,
@@ -12,7 +11,7 @@ import {
   EmailAuthProvider,
   reauthenticateWithCredential,
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { useToast } from './ToastContext';
 
 interface AuthContextType {
@@ -39,131 +38,102 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    try {
-      const savedUser = localStorage.getItem('tp_current_user');
-      return savedUser ? JSON.parse(savedUser) : null;
-    } catch {
-      return null;
-    }
-  });
-
-  const [isLoading, setIsLoading] = useState<boolean>(() => {
-    try {
-      return !localStorage.getItem('tp_current_user') && isFirebaseConfigured;
-    } catch {
-      return true;
-    }
-  });
-
+  // Pure Firebase Authentication state - NEVER load from localStorage
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isFirebaseActive] = useState<boolean>(isFirebaseConfigured);
   const { success, error, info } = useToast();
 
-  // Helper to load or sync user profile
-  const syncUserProfile = async (fbUser: any) => {
+  /**
+   * Helper to fetch and strictly validate the user profile from Firestore users/{uid}.
+   * Requirement 8: Sau khi đăng nhập, phải đọc hồ sơ users/{uid} từ Firestore.
+   * Requirement 9: Nếu không có users/{uid}, trạng thái không ACTIVE hoặc không có role hợp lệ thì đăng xuất ngay.
+   */
+  const syncUserProfile = async (fbUser: any): Promise<User | null> => {
     try {
-      // 1. Get Custom Claims
-      const tokenResult = await fbUser.getIdTokenResult(true);
-      const claimRole = (tokenResult.claims.role as UserRole) || (tokenResult.claims.admin ? 'ADMIN' : undefined);
-
-      // 2. Get Firestore Document
       const userDocRef = doc(db, 'users', fbUser.uid);
       const userSnap = await getDoc(userDocRef);
 
+      // Requirement 9: Nếu không có users/{uid} -> đăng xuất ngay
+      if (!userSnap.exists()) {
+        console.warn(`Tài khoản ${fbUser.uid} (${fbUser.email}) chưa có hồ sơ users/{uid} trên Firestore`);
+        await signOut(auth);
+        setCurrentUser(null);
+        error(
+          'Chưa có hồ sơ nhân sự',
+          `Tài khoản (${fbUser.email}) chưa có hồ sơ nhân viên trong hệ thống (users/${fbUser.uid}). Vui lòng liên hệ Quản trị viên để được tạo hồ sơ.`
+        );
+        return null;
+      }
+
+      const firestoreData = userSnap.data() as User;
+
+      // Requirement 9: Kiểm tra trạng thái: Nếu không ACTIVE -> đăng xuất ngay
+      if (firestoreData.status !== 'ACTIVE') {
+        await signOut(auth);
+        setCurrentUser(null);
+        error('Tài khoản bị khóa', 'Tài khoản nhân sự của bạn đang trong trạng thái bị khóa hoặc ngừng hoạt động.');
+        return null;
+      }
+
+      // Requirement 9: Kiểm tra role: Nếu không có role hợp lệ -> đăng xuất ngay
+      const validRoles: UserRole[] = ['ADMIN', 'TEAM_LEADER', 'AGENT'];
+      if (!firestoreData.role || !validRoles.includes(firestoreData.role)) {
+        await signOut(auth);
+        setCurrentUser(null);
+        error('Phân quyền không hợp lệ', 'Tài khoản chưa được phân quyền vai trò hợp lệ trong hệ thống.');
+        return null;
+      }
+
       const isDefaultAdmin =
         fbUser.email === 'quidanh.aff001@gmail.com' ||
-        fbUser.email?.toLowerCase().includes('admin') ||
-        claimRole === 'ADMIN';
+        firestoreData.role === 'ADMIN';
 
-      if (userSnap.exists()) {
-        const firestoreData = userSnap.data() as User;
+      const effectiveRole: UserRole = isDefaultAdmin ? 'ADMIN' : firestoreData.role;
 
-        // Check if account is locked
-        if (firestoreData.status === 'LOCKED') {
-          await signOut(auth);
-          setCurrentUser(null);
-          localStorage.removeItem('tp_current_user');
-          error('Tài khoản bị khóa', 'Tài khoản của bạn đang bị khóa bởi Quản trị viên sàn.');
-          return;
-        }
-
-        const effectiveRole: UserRole = claimRole || firestoreData.role || (isDefaultAdmin ? 'ADMIN' : 'AGENT');
-        const updatedUser: User = {
-          ...firestoreData,
-          id: fbUser.uid,
-          uid: fbUser.uid,
-          role: effectiveRole,
-          email: fbUser.email || firestoreData.email,
-          lastLoginAt: new Date().toISOString(),
-        };
-
-        // Update last login in Firestore non-blockingly
-        updateDoc(userDocRef, {
-          lastLoginAt: new Date().toISOString(),
-          ...(claimRole ? { role: claimRole } : {}),
-        }).catch(() => {});
-
-        setCurrentUser(updatedUser);
-        localStorage.setItem('tp_current_user', JSON.stringify(updatedUser));
-      } else {
-        // Create initial Firestore user document
-        const newUser: User = {
-          id: fbUser.uid,
-          uid: fbUser.uid,
-          employeeCode: `TP-${Math.floor(100 + Math.random() * 900)}`,
-          fullName: fbUser.displayName || fbUser.email?.split('@')[0] || 'Chuyên viên TRUONG PHAT',
-          email: fbUser.email || '',
-          phone: fbUser.phoneNumber || '0919414884',
-          avatarUrl: fbUser.photoURL || undefined,
-          role: isDefaultAdmin ? 'ADMIN' : 'AGENT',
-          status: 'ACTIVE',
-          mustChangePassword: false,
-          createdAt: new Date().toISOString(),
-          lastLoginAt: new Date().toISOString(),
-          propertiesCount: 0,
-          customersCount: 0,
-          dealsCount: 0,
-        };
-
-        await setDoc(userDocRef, newUser, { merge: true });
-        setCurrentUser(newUser);
-        localStorage.setItem('tp_current_user', JSON.stringify(newUser));
-      }
-    } catch (err: any) {
-      console.error('Error fetching Firestore user profile:', err);
-      // Fallback
-      const fallbackUser: User = {
+      const verifiedUser: User = {
+        ...firestoreData,
         id: fbUser.uid,
         uid: fbUser.uid,
-        employeeCode: 'TP-001',
-        fullName: fbUser.displayName || 'Nhân sự TRUONG PHAT',
-        email: fbUser.email || '',
-        phone: '0919414884',
-        role: fbUser.email === 'quidanh.aff001@gmail.com' ? 'ADMIN' : 'AGENT',
-        status: 'ACTIVE',
-        createdAt: new Date().toISOString(),
+        role: effectiveRole,
+        email: fbUser.email || firestoreData.email,
+        lastLoginAt: new Date().toISOString(),
       };
-      setCurrentUser(fallbackUser);
-      localStorage.setItem('tp_current_user', JSON.stringify(fallbackUser));
+
+      // Non-blocking update of lastLoginAt in Firestore
+      updateDoc(userDocRef, {
+        lastLoginAt: new Date().toISOString(),
+      }).catch(() => {});
+
+      setCurrentUser(verifiedUser);
+      return verifiedUser;
+    } catch (err: any) {
+      console.error('Lỗi khi đọc hồ sơ users/{uid}:', err);
+      await signOut(auth);
+      setCurrentUser(null);
+      error('Lỗi xác thực hồ sơ', 'Không thể xác thực hồ sơ nhân sự từ Firestore. Hệ thống đã đăng xuất an toàn.');
+      return null;
     }
   };
 
+  /**
+   * Requirement 5: ProtectedRoute phải kiểm tra Firebase onAuthStateChanged.
+   * Requirement 6: Không cho truy cập Dashboard chỉ dựa vào dữ liệu local.
+   * Requirement 2: Xóa dữ liệu đăng nhập giả khỏi LocalStorage/SessionStorage.
+   */
   useEffect(() => {
+    // Xóa sạch toàn bộ dữ liệu session giả trong storage
+    try {
+      localStorage.removeItem('tp_current_user');
+      sessionStorage.removeItem('tp_current_user');
+    } catch {}
+
     if (isFirebaseConfigured) {
       const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
         if (fbUser) {
           await syncUserProfile(fbUser);
         } else {
-          const savedUser = localStorage.getItem('tp_current_user');
-          if (savedUser) {
-            try {
-              setCurrentUser(JSON.parse(savedUser));
-            } catch (e) {
-              setCurrentUser(null);
-            }
-          } else {
-            setCurrentUser(null);
-          }
+          setCurrentUser(null);
         }
         setIsLoading(false);
       });
@@ -173,106 +143,73 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, []);
 
-  const switchDemoUser = (userId: string) => {
-    const target = SAMPLE_USERS.find((u) => u.id === userId);
-    if (target) {
-      setCurrentUser(target);
-      localStorage.setItem('tp_current_user', JSON.stringify(target));
-      success('Đã chuyển tài khoản', `Bạn đang thao tác với vai trò ${getRoleName(target.role)}: ${target.fullName}`);
-    }
-  };
-
+  /**
+   * Requirement 3: Chỉ chuyển vào Dashboard khi Firebase signInWithEmailAndPassword trả về user hợp lệ.
+   * Requirement 4: Nếu Firebase trả lỗi, phải giữ nguyên tại trang đăng nhập và báo lỗi tiếng Việt.
+   * Requirement 15: Kiểm tra lại để bảo đảm nhập sai mật khẩu tuyệt đối không thể vào hệ thống.
+   * Requirement 1: Xóa toàn bộ tài khoản mẫu, mock session và cơ chế đăng nhập dự phòng.
+   */
   const loginWithEmail = async (accountInput: string, pass: string): Promise<boolean> => {
-    const cleanAccount = accountInput.trim().toLowerCase();
+    const cleanAccount = accountInput.trim();
     const cleanPass = pass.trim();
 
     if (!cleanAccount) {
-      error('Thiếu thông tin', 'Vui lòng nhập Email hoặc Mã nhân sự');
+      error('Thiếu thông tin', 'Vui lòng nhập Email đăng nhập.');
       return false;
     }
     if (!cleanPass) {
-      error('Thiếu thông tin', 'Vui lòng nhập Mật khẩu');
+      error('Thiếu thông tin', 'Vui lòng nhập Mật khẩu.');
+      return false;
+    }
+
+    if (!cleanAccount.includes('@')) {
+      error('Email không hợp lệ', 'Vui lòng nhập đúng định dạng Email đã được đăng ký trên hệ thống.');
+      return false;
+    }
+
+    if (!isFirebaseConfigured) {
+      error('Chưa kết nối Firebase', 'Hệ thống chưa kết nối được đến máy chủ Firebase Authentication.');
       return false;
     }
 
     try {
       setIsLoading(true);
 
-      // If Firebase Auth is configured
-      if (isFirebaseConfigured) {
-        let emailToLogin = cleanAccount;
+      // CHỈ đăng nhập qua Firebase Authentication - TUYỆT ĐỐI KHÔNG FALLBACK
+      const userCred = await signInWithEmailAndPassword(auth, cleanAccount, cleanPass);
 
-        // If user entered employeeCode instead of email, check sample or firestore lookup
-        if (!cleanAccount.includes('@')) {
-          const matchedSample = SAMPLE_USERS.find(
-            (u) => u.employeeCode.toLowerCase() === cleanAccount || (cleanAccount === 'admin' && u.role === 'ADMIN')
-          );
-          if (matchedSample) {
-            emailToLogin = matchedSample.email;
-          }
-        }
-
-        try {
-          const userCred = await signInWithEmailAndPassword(auth, emailToLogin, cleanPass);
-          await syncUserProfile(userCred.user);
-          success('Đăng nhập thành công', `Chào mừng ${userCred.user.displayName || emailToLogin}`);
-          return true;
-        } catch (fbAuthErr: any) {
-          console.warn('Firebase login attempt failed:', fbAuthErr.code, fbAuthErr.message);
-
-          // Fallback to sample user if offline / local demo test accounts match
-          const matched = SAMPLE_USERS.find(
-            (u) =>
-              u.email.toLowerCase() === cleanAccount ||
-              u.employeeCode.toLowerCase() === cleanAccount ||
-              (cleanAccount === 'admin' && u.role === 'ADMIN')
-          );
-
-          if (matched) {
-            if (matched.status === 'LOCKED') {
-              error('Tài khoản bị khóa', 'Tài khoản của bạn đang bị tạm khóa. Vui lòng liên hệ Quản trị viên sàn.');
-              return false;
-            }
-            setCurrentUser(matched);
-            localStorage.setItem('tp_current_user', JSON.stringify(matched));
-            success('Đăng nhập thành công', `Chào mừng ${matched.fullName} (${getRoleName(matched.role)})`);
-            return true;
-          }
-
-          if (fbAuthErr.code === 'auth/user-not-found' || fbAuthErr.code === 'auth/invalid-credential' || fbAuthErr.code === 'auth/wrong-password') {
-            error('Đăng nhập thất bại', 'Tài khoản hoặc mật khẩu không chính xác.');
-          } else if (fbAuthErr.code === 'auth/user-disabled') {
-            error('Tài khoản bị khóa', 'Tài khoản này đã bị vô hiệu hóa trong hệ thống.');
-          } else {
-            error('Đăng nhập thất bại', fbAuthErr.message || 'Lỗi xác thực.');
-          }
-          return false;
-        }
+      // Đọc và kiểm tra hồ sơ users/{uid} từ Firestore
+      const verifiedProfile = await syncUserProfile(userCred.user);
+      if (!verifiedProfile) {
+        return false;
       }
 
-      // Offline mode fallback
-      const matched = SAMPLE_USERS.find(
-        (u) =>
-          u.email.toLowerCase() === cleanAccount ||
-          u.employeeCode.toLowerCase() === cleanAccount ||
-          (cleanAccount === 'admin' && u.role === 'ADMIN')
-      );
+      success('Đăng nhập thành công', `Chào mừng ${verifiedProfile.fullName} (${getRoleName(verifiedProfile.role)})`);
+      return true;
+    } catch (fbAuthErr: any) {
+      console.warn('Firebase login attempt failed:', fbAuthErr.code, fbAuthErr.message);
 
-      if (matched) {
-        if (matched.status === 'LOCKED') {
-          error('Tài khoản bị khóa', 'Tài khoản của bạn đang bị tạm khóa.');
-          return false;
-        }
-        setCurrentUser(matched);
-        localStorage.setItem('tp_current_user', JSON.stringify(matched));
-        success('Đăng nhập thành công', `Chào mừng ${matched.fullName}`);
-        return true;
+      // Báo lỗi bằng tiếng Việt rõ ràng cho từng mã lỗi Firebase Authentication
+      let message = 'Tài khoản hoặc mật khẩu không chính xác. Vui lòng kiểm tra lại.';
+      if (
+        fbAuthErr.code === 'auth/invalid-credential' ||
+        fbAuthErr.code === 'auth/wrong-password' ||
+        fbAuthErr.code === 'auth/user-not-found'
+      ) {
+        message = 'Tài khoản hoặc mật khẩu không chính xác. Vui lòng kiểm tra lại.';
+      } else if (fbAuthErr.code === 'auth/invalid-email') {
+        message = 'Địa chỉ email không đúng định dạng. Vui lòng kiểm tra lại.';
+      } else if (fbAuthErr.code === 'auth/user-disabled') {
+        message = 'Tài khoản này đã bị khóa trên hệ thống.';
+      } else if (fbAuthErr.code === 'auth/too-many-requests') {
+        message = 'Đã thử đăng nhập sai quá nhiều lần. Vui lòng đợi ít phút trước khi thử lại.';
+      } else if (fbAuthErr.code === 'auth/network-request-failed') {
+        message = 'Không thể kết nối đến máy chủ xác thực. Vui lòng kiểm tra kết nối Internet.';
+      } else if (fbAuthErr.message) {
+        message = `Lỗi xác thực: ${fbAuthErr.message}`;
       }
 
-      error('Tài khoản không tồn tại', 'Không tìm thấy Email hoặc Mã nhân sự trong hệ thống.');
-      return false;
-    } catch (err: any) {
-      error('Đăng nhập thất bại', err.message || 'Lỗi không xác định.');
+      error('Đăng nhập thất bại', message);
       return false;
     } finally {
       setIsLoading(false);
@@ -282,20 +219,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const loginWithGoogle = async (): Promise<boolean> => {
     try {
       setIsLoading(true);
-      if (isFirebaseConfigured) {
-        const result = await signInWithPopup(auth, googleProvider);
-        await syncUserProfile(result.user);
-        success('Đăng nhập Google thành công');
-        return true;
-      } else {
-        const adminUser = SAMPLE_USERS[0];
-        setCurrentUser(adminUser);
-        localStorage.setItem('tp_current_user', JSON.stringify(adminUser));
-        success('Đăng nhập Google thành công', `Đăng nhập với email Quản trị: ${adminUser.email}`);
-        return true;
+      if (!isFirebaseConfigured) {
+        error('Lỗi cấu hình', 'Firebase chưa được thiết lập.');
+        return false;
       }
+      const result = await signInWithPopup(auth, googleProvider);
+      const verified = await syncUserProfile(result.user);
+      if (!verified) return false;
+      success('Đăng nhập Google thành công');
+      return true;
     } catch (err: any) {
-      error('Đăng nhập Google thất bại', err.message);
+      error('Đăng nhập Google thất bại', err.message || 'Lỗi đăng nhập Google');
       return false;
     } finally {
       setIsLoading(false);
@@ -303,30 +237,36 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const logout = async () => {
-    localStorage.removeItem('tp_current_user');
-    if (isFirebaseConfigured) {
-      try {
+    try {
+      localStorage.removeItem('tp_current_user');
+      sessionStorage.removeItem('tp_current_user');
+      if (isFirebaseConfigured) {
         await signOut(auth);
-      } catch (err) {
-        console.error(err);
       }
+    } catch (err) {
+      console.error('Logout error:', err);
     }
     setCurrentUser(null);
-    info('Đã đăng xuất', 'Hẹn gặp lại bạn trong phiên làm việc tiếp theo');
+    info('Đã đăng xuất', 'Hẹn gặp lại bạn trong phiên làm việc tiếp theo.');
   };
 
   const resetPassword = async (email: string): Promise<boolean> => {
     try {
-      if (isFirebaseConfigured) {
-        await sendPasswordResetEmail(auth, email);
-        success('Đã gửi email khôi phục', 'Vui lòng kiểm tra hộp thư đến của bạn.');
-        return true;
-      } else {
-        success('Yêu cầu đã tiếp nhận', `Đã gửi hướng dẫn khôi phục mật khẩu tới địa chỉ ${email}`);
-        return true;
+      if (!isFirebaseConfigured) {
+        error('Lỗi cấu hình', 'Firebase chưa được cấu hình.');
+        return false;
       }
+      await sendPasswordResetEmail(auth, email.trim());
+      success('Đã gửi email khôi phục', 'Vui lòng kiểm tra hộp thư đến của bạn để đặt lại mật khẩu.');
+      return true;
     } catch (err: any) {
-      error('Gửi thất bại', err.message);
+      let msg = 'Không thể gửi email đặt lại mật khẩu.';
+      if (err.code === 'auth/user-not-found') {
+        msg = 'Email này không tồn tại trong hệ thống.';
+      } else if (err.code === 'auth/invalid-email') {
+        msg = 'Định dạng email không hợp lệ.';
+      }
+      error('Gửi thất bại', msg);
       return false;
     }
   };
@@ -353,7 +293,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (currentUser) {
         const updated = { ...currentUser, mustChangePassword: false };
         setCurrentUser(updated);
-        localStorage.setItem('tp_current_user', JSON.stringify(updated));
       }
 
       success('Đổi mật khẩu thành công', 'Mật khẩu của bạn đã được cập nhật an toàn.');
@@ -386,22 +325,27 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  // Deprecated dummy method to preserve interface compatibility without mock functionality
+  const switchDemoUser = () => {
+    error('Tính năng bị khóa', 'Cơ chế tài khoản mẫu đã bị vô hiệu hóa.');
+  };
+
   const isAdmin = currentUser?.role === 'ADMIN' || currentUser?.email === 'quidanh.aff001@gmail.com';
   const isTeamLeader = currentUser?.role === 'TEAM_LEADER' || isAdmin;
   const isAgent = currentUser?.role === 'AGENT';
   const mustChangePassword = Boolean(currentUser?.mustChangePassword);
 
   const canEditProperty = (propertyCreatedBy?: string, propertyAssignedTo?: string) => {
+    if (!currentUser) return false;
     if (isAdmin) return true;
     if (isTeamLeader) return true;
-    if (!currentUser) return false;
     return currentUser.id === propertyCreatedBy || currentUser.id === propertyAssignedTo;
   };
 
   const canViewConfidentialOwner = (propertyCreatedBy?: string, propertyAssignedTo?: string) => {
+    if (!currentUser) return false;
     if (isAdmin) return true;
     if (isTeamLeader) return true;
-    if (!currentUser) return false;
     return currentUser.id === propertyCreatedBy || currentUser.id === propertyAssignedTo;
   };
 

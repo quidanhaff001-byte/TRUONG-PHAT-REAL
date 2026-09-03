@@ -260,7 +260,23 @@ export const Dashboard: React.FC = () => {
       </div>
 
       {/* 3 Columns Grid for Featured Properties matching design */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {recentProperties.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-dashed border-gray-300 p-10 text-center">
+          <Building2 className="w-10 h-10 text-gray-300 mx-auto mb-2" />
+          <h3 className="text-sm font-bold text-[#001f3f] mb-1">Chưa có nguồn hàng nào</h3>
+          <p className="text-xs text-gray-500 max-w-sm mx-auto mb-4">
+            Cơ sở dữ liệu Firestore hiện tại chưa có dữ liệu nguồn hàng.
+          </p>
+          <button
+            onClick={() => navigate('/properties/new')}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-[#001f3f] text-white rounded-xl text-xs font-bold hover:bg-[#002e5c] transition-all cursor-pointer"
+          >
+            <PlusCircle className="w-4 h-4 text-[#D4AF37]" />
+            <span>Tiếp nhận nguồn hàng đầu tiên</span>
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {recentProperties.map((p) => (
           <div
             key={p.id}
@@ -333,7 +349,8 @@ export const Dashboard: React.FC = () => {
             </div>
           </div>
         ))}
-      </div>
+        </div>
+      )}
     </div>
   );
 };

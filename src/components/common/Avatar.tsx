@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 
 /**
  * Extracts initials from Vietnamese or international names
- * Example: "Nguyễn Văn Quản Trị" -> "NQ"
+ * Example: "Nguyễn Văn Thành Đạt" -> "NT"
  * Example: "Trần Thị Thu Hà" -> "TH"
  * Example: "Lê Hoàng Nam" -> "LN"
  * Example: "Phạm Minh Đức" -> "PĐ"
@@ -14,7 +14,7 @@ export function getUserInitials(name?: string): string {
   if (words.length === 0) return 'TP';
   if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
 
-  // Special rule for 4-word Vietnamese names like "Nguyễn Văn Quản Trị" -> NQ
+  // Special rule for 4-word Vietnamese names like "Nguyễn Văn Thành Đạt" -> NT
   if (
     words.length >= 4 &&
     (words[1].toLowerCase() === 'văn' || words[1].toLowerCase() === 'thị' || words[1].toLowerCase() === 'hữu' || words[1].toLowerCase() === 'đức')

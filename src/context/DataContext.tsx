@@ -211,19 +211,20 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const { currentUser } = useAuth();
   const { success, error, info } = useToast();
 
-  const [properties, setProperties] = useState<Property[]>(SAMPLE_PROPERTIES);
-  const [users, setUsers] = useState<User[]>(SAMPLE_USERS);
-  const [teams, setTeams] = useState<Team[]>(SAMPLE_TEAMS);
-  const [customers, setCustomers] = useState<Customer[]>(SAMPLE_CUSTOMERS);
-  const [appointments, setAppointments] = useState<Appointment[]>(SAMPLE_APPOINTMENTS);
-  const [matches, setMatches] = useState<PropertyMatch[]>(SAMPLE_MATCHES);
-  const [transactions, setTransactions] = useState<Transaction[]>(SAMPLE_TRANSACTIONS);
-  const [rentalDeals, setRentalDeals] = useState<RentalDeal[]>(SAMPLE_RENTAL_DEALS);
-  const [rentalContracts, setRentalContracts] = useState<RentalContract[]>(SAMPLE_RENTAL_CONTRACTS);
-  const [rentalPayments, setRentalPayments] = useState<RentalPayment[]>(SAMPLE_RENTAL_PAYMENTS);
-  const [commissions, setCommissions] = useState<Commission[]>(SAMPLE_COMMISSIONS);
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(SAMPLE_AUDIT_LOGS);
-  const [notifications, setNotifications] = useState<Notification[]>(SAMPLE_NOTIFICATIONS);
+  // Real Firestore operational data - Default to empty state (Requirement 10, 11, 12)
+  const [properties, setProperties] = useState<Property[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [matches, setMatches] = useState<PropertyMatch[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [rentalDeals, setRentalDeals] = useState<RentalDeal[]>([]);
+  const [rentalContracts, setRentalContracts] = useState<RentalContract[]>([]);
+  const [rentalPayments, setRentalPayments] = useState<RentalPayment[]>([]);
+  const [commissions, setCommissions] = useState<Commission[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [locations, setLocations] = useState<LocationItem[]>(MASTER_LOCATIONS);
 
   const [systemSettings, setSystemSettings] = useState<SystemSettings>(() => {
@@ -237,7 +238,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [filterState, setFilterState] = useState<PropertyFilterState>(defaultFilterState);
-  const [hasAttemptedSeed, setHasAttemptedSeed] = useState<boolean>(false);
 
   // Helper to log user actions to Audit Logs
   const addAuditLog = async (log: Omit<AuditLog, 'id' | 'timestamp'>) => {
@@ -364,8 +364,25 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   // Firebase Realtime Snapshots
+  // Requirement 7: Không khởi tạo Firestore listener trước khi Firebase xác nhận đăng nhập
+  // Requirement 11: Không dùng fallback data khi Firestore trống hoặc bị từ chối quyền
+  // Requirement 12: Khi Firestore trống, hiển thị số liệu bằng 0
+  // Requirement 13: Không được bắt lỗi Firebase rồi âm thầm thay bằng mock data
   useEffect(() => {
-    if (!isFirebaseConfigured) {
+    if (!currentUser || !isFirebaseConfigured) {
+      setProperties([]);
+      setUsers([]);
+      setTeams([]);
+      setCustomers([]);
+      setAppointments([]);
+      setMatches([]);
+      setTransactions([]);
+      setRentalDeals([]);
+      setRentalContracts([]);
+      setRentalPayments([]);
+      setCommissions([]);
+      setAuditLogs([]);
+      setNotifications([]);
       setIsLoading(false);
       return;
     }
@@ -379,10 +396,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           const loaded = { ...DEFAULT_SYSTEM_SETTINGS, ...snapshot.data() } as SystemSettings;
           setSystemSettings(loaded);
           localStorage.setItem('tp_system_settings', JSON.stringify(loaded));
-        } else {
-          setDoc(doc(db, 'settings', 'general'), DEFAULT_SYSTEM_SETTINGS, { merge: true }).catch((e) =>
-            console.warn('Notice setting default general config:', e.message)
-          );
         }
       },
       (err) => console.warn('Snapshot listener notice on settings:', err?.message || err)
@@ -391,17 +404,13 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const unsubProps = onSnapshot(
       collection(db, 'properties'),
       (snapshot) => {
-        if (!snapshot.empty) {
-          const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Property));
-          setProperties(loaded);
-        } else if (!hasAttemptedSeed) {
-          setHasAttemptedSeed(true);
-          seedInitialDataToFirestore();
-        }
+        const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Property));
+        setProperties(loaded);
         setIsLoading(false);
       },
       (err) => {
         console.warn('Snapshot listener notice on properties:', err?.message || err);
+        setProperties([]);
         setIsLoading(false);
       }
     );
@@ -409,125 +418,147 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const unsubUsers = onSnapshot(
       collection(db, 'users'),
       (snapshot) => {
-        if (!snapshot.empty) {
-          setUsers(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as User)));
-        }
+        const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as User));
+        setUsers(loaded);
       },
-      (err) => console.warn('Snapshot listener notice on users:', err?.message || err)
+      (err) => {
+        console.warn('Snapshot listener notice on users:', err?.message || err);
+        setUsers([]);
+      }
     );
 
     const unsubTeams = onSnapshot(
       collection(db, 'teams'),
       (snapshot) => {
-        if (!snapshot.empty) {
-          setTeams(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Team)));
-        }
+        const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Team));
+        setTeams(loaded);
       },
-      (err) => console.warn('Snapshot listener notice on teams:', err?.message || err)
+      (err) => {
+        console.warn('Snapshot listener notice on teams:', err?.message || err);
+        setTeams([]);
+      }
     );
 
     const unsubCustomers = onSnapshot(
       collection(db, 'customers'),
       (snapshot) => {
-        if (!snapshot.empty) {
-          setCustomers(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Customer)));
-        }
+        const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Customer));
+        setCustomers(loaded);
       },
-      (err) => console.warn('Snapshot listener notice on customers:', err?.message || err)
+      (err) => {
+        console.warn('Snapshot listener notice on customers:', err?.message || err);
+        setCustomers([]);
+      }
     );
 
     const unsubAppointments = onSnapshot(
       collection(db, 'appointments'),
       (snapshot) => {
-        if (!snapshot.empty) {
-          setAppointments(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Appointment)));
-        }
+        const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Appointment));
+        setAppointments(loaded);
       },
-      (err) => console.warn('Snapshot listener notice on appointments:', err?.message || err)
+      (err) => {
+        console.warn('Snapshot listener notice on appointments:', err?.message || err);
+        setAppointments([]);
+      }
     );
 
     const unsubMatches = onSnapshot(
       collection(db, 'propertyMatches'),
       (snapshot) => {
-        if (!snapshot.empty) {
-          setMatches(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as PropertyMatch)));
-        }
+        const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as PropertyMatch));
+        setMatches(loaded);
       },
-      (err) => console.warn('Snapshot listener notice on propertyMatches:', err?.message || err)
+      (err) => {
+        console.warn('Snapshot listener notice on propertyMatches:', err?.message || err);
+        setMatches([]);
+      }
     );
 
     const unsubTransactions = onSnapshot(
       collection(db, 'transactions'),
       (snapshot) => {
-        if (!snapshot.empty) {
-          setTransactions(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Transaction)));
-        }
+        const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Transaction));
+        setTransactions(loaded);
       },
-      (err) => console.warn('Snapshot listener notice on transactions:', err?.message || err)
+      (err) => {
+        console.warn('Snapshot listener notice on transactions:', err?.message || err);
+        setTransactions([]);
+      }
     );
 
     const unsubRentalDeals = onSnapshot(
       collection(db, 'rentalDeals'),
       (snapshot) => {
-        if (!snapshot.empty) {
-          setRentalDeals(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as RentalDeal)));
-        }
+        const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as RentalDeal));
+        setRentalDeals(loaded);
       },
-      (err) => console.warn('Snapshot listener notice on rentalDeals:', err?.message || err)
+      (err) => {
+        console.warn('Snapshot listener notice on rentalDeals:', err?.message || err);
+        setRentalDeals([]);
+      }
     );
 
     const unsubContracts = onSnapshot(
       collection(db, 'rentalContracts'),
       (snapshot) => {
-        if (!snapshot.empty) {
-          setRentalContracts(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as RentalContract)));
-        }
+        const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as RentalContract));
+        setRentalContracts(loaded);
       },
-      (err) => console.warn('Snapshot listener notice on rentalContracts:', err?.message || err)
+      (err) => {
+        console.warn('Snapshot listener notice on rentalContracts:', err?.message || err);
+        setRentalContracts([]);
+      }
     );
 
     const unsubPayments = onSnapshot(
       collection(db, 'rentalPayments'),
       (snapshot) => {
-        if (!snapshot.empty) {
-          setRentalPayments(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as RentalPayment)));
-        }
+        const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as RentalPayment));
+        setRentalPayments(loaded);
       },
-      (err) => console.warn('Snapshot listener notice on rentalPayments:', err?.message || err)
+      (err) => {
+        console.warn('Snapshot listener notice on rentalPayments:', err?.message || err);
+        setRentalPayments([]);
+      }
     );
 
     const unsubCommissions = onSnapshot(
       collection(db, 'commissions'),
       (snapshot) => {
-        if (!snapshot.empty) {
-          setCommissions(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Commission)));
-        }
+        const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Commission));
+        setCommissions(loaded);
       },
-      (err) => console.warn('Snapshot listener notice on commissions:', err?.message || err)
+      (err) => {
+        console.warn('Snapshot listener notice on commissions:', err?.message || err);
+        setCommissions([]);
+      }
     );
 
     const unsubAuditLogs = onSnapshot(
       collection(db, 'auditLogs'),
       (snapshot) => {
-        if (!snapshot.empty) {
-          const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as AuditLog));
-          loaded.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-          setAuditLogs(loaded);
-        }
+        const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as AuditLog));
+        loaded.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        setAuditLogs(loaded);
       },
-      (err) => console.warn('Snapshot listener notice on auditLogs:', err?.message || err)
+      (err) => {
+        console.warn('Snapshot listener notice on auditLogs:', err?.message || err);
+        setAuditLogs([]);
+      }
     );
 
     const unsubNotifs = onSnapshot(
       collection(db, 'notifications'),
       (snapshot) => {
-        if (!snapshot.empty) {
-          const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Notification));
-          loaded.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-          setNotifications(loaded);
-        }
+        const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Notification));
+        loaded.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        setNotifications(loaded);
       },
-      (err) => console.warn('Snapshot listener notice on notifications:', err?.message || err)
+      (err) => {
+        console.warn('Snapshot listener notice on notifications:', err?.message || err);
+        setNotifications([]);
+      }
     );
 
     const unsubLocations = onSnapshot(
@@ -559,30 +590,19 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       unsubNotifs();
       unsubLocations();
     };
-  }, []);
+  }, [currentUser?.id, isFirebaseConfigured]);
 
   const resetFilters = () => {
     setFilterState(defaultFilterState);
   };
 
-  const resetDemoData = () => {
-    setProperties(SAMPLE_PROPERTIES);
-    setUsers(SAMPLE_USERS);
-    setTeams(SAMPLE_TEAMS);
-    setCustomers(SAMPLE_CUSTOMERS);
-    setAppointments(SAMPLE_APPOINTMENTS);
-    setMatches(SAMPLE_MATCHES);
-    setTransactions(SAMPLE_TRANSACTIONS);
-    setRentalDeals(SAMPLE_RENTAL_DEALS);
-    setRentalContracts(SAMPLE_RENTAL_CONTRACTS);
-    setRentalPayments(SAMPLE_RENTAL_PAYMENTS);
-    setCommissions(SAMPLE_COMMISSIONS);
-    setAuditLogs(SAMPLE_AUDIT_LOGS);
-    setNotifications(SAMPLE_NOTIFICATIONS);
-    setSystemSettings(DEFAULT_SYSTEM_SETTINGS);
-    localStorage.setItem('tp_system_settings', JSON.stringify(DEFAULT_SYSTEM_SETTINGS));
-    seedInitialDataToFirestore(true);
-    success('Đã nạp lại dữ liệu An Giang mới', 'Dữ liệu bất động sản, khách hàng và nhân sự An Giang đã được cập nhật.');
+  const resetDemoData = async () => {
+    if (!currentUser || currentUser.role !== 'ADMIN') {
+      error('Từ chối quyền', 'Chỉ Quản trị viên mới có quyền nạp lại dữ liệu.');
+      return;
+    }
+    await seedInitialDataToFirestore(true);
+    success('Đã nạp lại bộ dữ liệu chuẩn', 'Dữ liệu bất động sản, khách hàng và nhân sự đã được đồng bộ lên Firestore.');
   };
 
   // Duplicate Check logic for Properties
