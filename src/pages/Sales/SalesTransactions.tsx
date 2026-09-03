@@ -47,7 +47,6 @@ export const SalesTransactions: React.FC = () => {
     updateTransaction,
     updateTransactionStatus,
     deleteTransaction,
-    addCommission,
   } = useData();
   const { currentUser, isTeamLeader } = useAuth();
   const { success, error, info } = useToast();
@@ -109,7 +108,7 @@ export const SalesTransactions: React.FC = () => {
   };
 
   // Handle Add Transaction Submit
-  const handleAddSubmit阿拉伯 = async (e: React.FormEvent) => {
+  const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const prop = properties.find((p) => p.id === propertyId);
     const cust = customers.find((c) => c.id === customerId);
@@ -125,100 +124,109 @@ export const SalesTransactions: React.FC = () => {
       return;
     }
 
-    try {
-      const newTr = await addTransaction({
-        code: '', // auto generated
-        type,
-        status: 'Đã đặt cọc',
-        step: 1,
-        propertyId: prop.id,
-        propertyCode: prop.code,
-        propertyTitle: prop.title,
-        propertyAddress: prop.address,
-        sellerName: prop.ownerName,
-        sellerPhone: prop.ownerPhone,
-        buyerId: cust.id,
-        buyerName: cust.fullName,
-        buyerPhone: cust.phone,
-        dealPrice,
-        depositAmount,
-        depositDate,
-        notarizationDate: notarizationDate || undefined,
-        handoverDate: handoverDate || undefined,
-        expectedCommission,
-        commissionRate,
-        listingAgentId: listingAgent?.id || prop.assignedAgentId,
-        listingAgentName: listingAgent?.fullName || prop.assignedAgentName,
-        sellingAgentId: sellingAgent?.id || currentUser?.id,
-        sellingAgentName: sellingAgent?.fullName || currentUser?.fullName,
-        teamId: sellingAgent?.teamId || currentUser?.teamId,
-        notes,
-      });
+    const commissionDraft =
+      expectedCommission > 0
+        ? {
+            code: '',
+            dealType: type,
+            propertyCode: prop.code,
+            propertyTitle: prop.title,
+            customerName: cust.fullName,
+            dealPrice,
+            commissionRate,
+            totalExpectedCommission: expectedCommission,
+            companySharePercent: 30,
+            companyAmount: Math.round(expectedCommission * 0.3),
+            leaderSharePercent: 10,
+            leaderAmount: Math.round(expectedCommission * 0.1),
+            splits: [
+              {
+                id: `split_${Date.now()}_1`,
+                role: 'COMPANY' as const,
+                beneficiaryId: 'company',
+                beneficiaryName: 'Công ty BĐS Trường Phát Real',
+                percentage: 30,
+                amount: Math.round(expectedCommission * 0.3),
+                isPaid: false,
+              },
+              {
+                id: `split_${Date.now()}_2`,
+                role: 'LISTING_AGENT' as const,
+                beneficiaryId: listingAgent?.id || prop.assignedAgentId || 'agent_1',
+                beneficiaryName: listingAgent?.fullName || prop.assignedAgentName || 'Đầu nguồn BĐS',
+                percentage: 30,
+                amount: Math.round(expectedCommission * 0.3),
+                isPaid: false,
+              },
+              {
+                id: `split_${Date.now()}_3`,
+                role: 'SELLING_AGENT' as const,
+                beneficiaryId: sellingAgent?.id || currentUser?.id || 'agent_2',
+                beneficiaryName: sellingAgent?.fullName || currentUser?.fullName || 'Đầu bán chốt deal',
+                percentage: 30,
+                amount: Math.round(expectedCommission * 0.3),
+                isPaid: false,
+              },
+              {
+                id: `split_${Date.now()}_4`,
+                role: 'LEADER' as const,
+                beneficiaryId: sellingAgent?.teamId || 'leader_1',
+                beneficiaryName: 'Trưởng phòng kinh doanh',
+                percentage: 10,
+                amount: Math.round(expectedCommission * 0.1),
+                isPaid: false,
+              },
+            ],
+            collectedAmount: 0,
+            remainingCommission: expectedCommission,
+            status: 'CHUA_THU' as const,
+          }
+        : undefined;
 
-      // Auto create draft Commission Record for this deal
-      if (expectedCommission > 0) {
-        await addCommission({
-          dealId: newTr.id,
-          dealCode: newTr.code,
-          dealType: type,
+    try {
+      const result = await addTransaction(
+        {
+          code: '', // auto generated
+          type,
+          status: 'Đã đặt cọc',
+          step: 1,
+          propertyId: prop.id,
           propertyCode: prop.code,
           propertyTitle: prop.title,
-          customerName: cust.fullName,
+          propertyAddress: prop.address,
+          sellerName: prop.ownerName,
+          sellerPhone: prop.ownerPhone,
+          buyerId: cust.id,
+          buyerName: cust.fullName,
+          buyerPhone: cust.phone,
           dealPrice,
+          depositAmount,
+          depositDate,
+          notarizationDate: notarizationDate ? notarizationDate : undefined,
+          handoverDate: handoverDate ? handoverDate : undefined,
+          expectedCommission,
           commissionRate,
-          totalExpectedCommission: expectedCommission,
-          companySharePercent: 30,
-          companyAmount: Math.round(expectedCommission * 0.3),
-          leaderSharePercent: 10,
-          leaderAmount: Math.round(expectedCommission * 0.1),
-          splits: [
-            {
-              id: `split_${Date.now()}_1`,
-              role: 'COMPANY',
-              beneficiaryId: 'company',
-              beneficiaryName: 'Công ty BĐS Trường Phát Real',
-              percentage: 30,
-              amount: Math.round(expectedCommission * 0.3),
-              isPaid: false,
-            },
-            {
-              id: `split_${Date.now()}_2`,
-              role: 'LISTING_AGENT',
-              beneficiaryId: listingAgent?.id || 'agent_1',
-              beneficiaryName: listingAgent?.fullName || 'Đầu nguồn BĐS',
-              percentage: 30,
-              amount: Math.round(expectedCommission * 0.3),
-              isPaid: false,
-            },
-            {
-              id: `split_${Date.now()}_3`,
-              role: 'SELLING_AGENT',
-              beneficiaryId: sellingAgent?.id || currentUser?.id || 'agent_2',
-              beneficiaryName: sellingAgent?.fullName || 'Đầu bán chốt deal',
-              percentage: 30,
-              amount: Math.round(expectedCommission * 0.3),
-              isPaid: false,
-            },
-            {
-              id: `split_${Date.now()}_4`,
-              role: 'LEADER',
-              beneficiaryId: 'leader_1',
-              beneficiaryName: 'Trưởng phòng kinh doanh',
-              percentage: 10,
-              amount: Math.round(expectedCommission * 0.1),
-              isPaid: false,
-            },
-          ],
-          collectedAmount: 0,
-          remainingCommission: expectedCommission,
-          status: 'CHUA_THU',
-        });
-      }
+          listingAgentId: listingAgent?.id || prop.assignedAgentId,
+          listingAgentName: listingAgent?.fullName || prop.assignedAgentName,
+          sellingAgentId: sellingAgent?.id || currentUser?.id,
+          sellingAgentName: sellingAgent?.fullName || currentUser?.fullName,
+          teamId: sellingAgent?.teamId || currentUser?.teamId,
+          notes: notes?.trim() || undefined,
+        },
+        commissionDraft
+      );
 
+      // ONLY close modal and notify success AFTER atomic transaction write completes!
       setIsAddModalOpen(false);
-      success('Tạo giao dịch thành công', `Đã lưu hồ sơ giao dịch ${newTr.code}`);
+      success(
+        'Tạo giao dịch thành công',
+        `Đã lưu hồ sơ giao dịch ${result.transaction.code}${
+          result.commission ? ' và ghi nhận hoa hồng ' + result.commission.code : ''
+        }`
+      );
     } catch (err: any) {
-      error('Lỗi tạo giao dịch: ' + err.message);
+      error('Lỗi tạo giao dịch', err.message || 'Không thể ghi nhận giao dịch vào cơ sở dữ liệu');
+      // DO NOT close modal! Keep form state intact so user can fix or retry!
     }
   };
 
@@ -454,7 +462,7 @@ export const SalesTransactions: React.FC = () => {
               </button>
             </div>
 
-            <form onSubmit={handleAddSubmit阿拉伯} className="space-y-4 text-xs">
+            <form onSubmit={handleAddSubmit} className="space-y-4 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="font-bold text-slate-700 mb-1 block">Loại giao dịch *</label>

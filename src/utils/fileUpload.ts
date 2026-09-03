@@ -95,9 +95,17 @@ export function validatePropertyImageFile(
   return { valid: true };
 }
 
+async function fileToBase64(file: File | Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = (err) => reject(err);
+    reader.readAsDataURL(file);
+  });
+}
+
 /**
- * Uploads a single property image File/Blob directly to Firebase Storage at path:
- * properties/{propertyId}/images/{uniqueFileName}
+ * Uploads a single property image File/Blob directly to hosting storage or Firebase Storage:
  * Returns complete PropertyImageItem metadata with genuine downloadURL
  */
 export async function uploadPropertyImageToStorage(
@@ -114,10 +122,6 @@ export async function uploadPropertyImageToStorage(
     onProgress?: (progress: number) => void;
   } = {}
 ): Promise<PropertyImageItem> {
-  if (!isStorageConfigured) {
-    throw new Error('Chưa kết nối Firebase Storage hoặc cấu hình Storage Bucket không hợp lệ.');
-  }
-
   if (!file || !(file instanceof File || file instanceof Blob)) {
     throw new Error('Đối tượng tệp không hợp lệ.');
   }
@@ -125,9 +129,6 @@ export async function uploadPropertyImageToStorage(
   const originalName = options.fileName || (file instanceof File ? file.name : `img_${Date.now()}.jpg`);
   const safeOriginalName = originalName.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/\.[^/.]+$/, '');
   const timestamp = Date.now();
-  const uniqueFileName = `${timestamp}_${safeOriginalName}.jpg`;
-  const storagePath = `properties/${propertyId}/images/${uniqueFileName}`;
-  const storageRef = ref(storage, storagePath);
 
   // Use file directly or compress if not already compressed
   let fileToUpload: File | Blob = file;
@@ -145,6 +146,56 @@ export async function uploadPropertyImageToStorage(
       fileToUpload = file;
     }
   }
+
+  // 1. Primary: Upload to hosting server (Spark plan compatible)
+  try {
+    if (options.onProgress) options.onProgress(25);
+    const base64Data = await fileToBase64(fileToUpload);
+    if (options.onProgress) options.onProgress(60);
+
+    const res = await fetch('/api/upload-image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        base64Data,
+        fileName: originalName,
+        propertyId,
+      }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && data.url) {
+        if (options.onProgress) options.onProgress(100);
+        return {
+          id: `${propertyId}_img_${timestamp}_${Math.random().toString(36).substring(2, 6)}`,
+          propertyId: propertyId,
+          fileName: originalName,
+          storagePath: `uploads/${data.fileName}`,
+          downloadURL: data.url,
+          contentType: 'image/jpeg',
+          size: data.size || fileToUpload.size,
+          width: finalWidth || undefined,
+          height: finalHeight || undefined,
+          isCover: Boolean(options.isCover),
+          sortOrder: options.sortOrder ?? 0,
+          uploadedAt: new Date().toISOString(),
+          uploadedBy: options.uploadedBy || 'Môi giới',
+        };
+      }
+    }
+  } catch (hostingErr) {
+    console.warn('[Hosting Upload] Fallback attempt to Firebase Storage:', hostingErr);
+  }
+
+  // 2. Secondary fallback: Firebase Storage (if enabled)
+  if (!isStorageConfigured) {
+    throw new Error('Chưa kết nối Firebase Storage hoặc cấu hình Storage Bucket không hợp lệ.');
+  }
+
+  const uniqueFileName = `${timestamp}_${safeOriginalName}.jpg`;
+  const storagePath = `properties/${propertyId}/images/${uniqueFileName}`;
+  const storageRef = ref(storage, storagePath);
 
   return new Promise((resolve, reject) => {
     const uploadTask = uploadBytesResumable(storageRef, fileToUpload, {

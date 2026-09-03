@@ -444,6 +444,7 @@ export interface Appointment {
   propertyId?: string;
   propertyCode?: string;
   propertyTitle?: string;
+  propertyAddress?: string;
   transactionId?: string;
   contractId?: string;
   assignedAgentId: string;
@@ -549,7 +550,22 @@ export interface Transaction {
   depositDate: string;
   estimatedNotaryDate?: string;
   actualNotaryDate?: string;
+  notarizationDate?: string;
   handoverDate?: string;
+  
+  // Deals & Financials
+  dealPrice?: number;
+  expectedCommission?: number;
+  commissionRate?: number;
+  sellerName?: string;
+  sellerPhone?: string;
+  buyerId?: string;
+  buyerName?: string;
+  buyerPhone?: string;
+  listingAgentId?: string;
+  listingAgentName?: string;
+  sellingAgentId?: string;
+  sellingAgentName?: string;
   
   // Details
   taxPayer: 'BEN_BAN' | 'BEN_MUA' | 'HAI_BEN_THOA_THUAN';

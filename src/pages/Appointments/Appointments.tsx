@@ -123,26 +123,27 @@ export const Appointments: React.FC = () => {
     }
 
     const prop = properties.find((p) => p.id === newPropertyId);
-    const cust四周 = customers.find((c) => c.id === newCustomerId);
+    const cust = customers.find((c) => c.id === newCustomerId);
     const agent = users.find((u) => u.id === newAgentId);
 
     try {
       await addAppointment({
-        title: newTitle,
+        title: newTitle.trim(),
         type: newType,
         startDate: newStartDate,
         startTime: newStartTime,
         startDateTime: `${newStartDate}T${newStartTime}:00+07:00`,
         status: 'Đã lên lịch',
-        propertyId: prop?.id,
-        propertyCode: prop?.code,
-        propertyAddress: prop?.address,
-        customerId: cust四周?.id,
-        customerName: cust四周?.fullName || 'Khách hàng',
-        customerPhone: cust四周?.phone,
+        propertyId: prop?.id || undefined,
+        propertyCode: prop?.code || undefined,
+        propertyAddress: prop?.address || undefined,
+        customerId: cust?.id || undefined,
+        customerName: cust?.fullName || 'Khách hàng',
+        customerPhone: cust?.phone || undefined,
         assignedAgentId: agent?.id || currentUser?.id || 'agent_1',
         agentName: agent?.fullName || currentUser?.fullName || 'Môi giới',
-        notes: newNotes,
+        teamId: agent?.teamId || currentUser?.teamId || undefined,
+        notes: newNotes?.trim() || undefined,
       });
 
       setIsAddModalOpen(false);
@@ -150,7 +151,7 @@ export const Appointments: React.FC = () => {
       setNewNotes('');
       success('Tạo lịch hẹn thành công');
     } catch (err: any) {
-      error('Lỗi khi tạo lịch hẹn: ' + err.message);
+      error('Lỗi khi tạo lịch hẹn', err.message || 'Không thể lưu lịch hẹn vào cơ sở dữ liệu');
     }
   };
 

@@ -51,6 +51,7 @@ import {
   updateDoc,
   deleteDoc,
   getDocs,
+  writeBatch,
 } from 'firebase/firestore';
 
 export interface DuplicateCheckResult {
@@ -137,7 +138,10 @@ interface DataContextType {
   completeAppointment: (id: string, resultNotes: string, customerFeedback?: string, nextAction?: string) => Promise<void>;
 
   // Transaction Actions (Bán & Sang nhượng)
-  addTransaction: (transData: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Transaction>;
+  addTransaction: (
+    transData: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'>,
+    commissionDraft?: Omit<Commission, 'id' | 'dealId' | 'dealCode' | 'createdAt' | 'updatedAt'>
+  ) => Promise<{ transaction: Transaction; commission?: Commission }>;
   updateTransaction: (id: string, data: Partial<Transaction>) => Promise<void>;
   updateTransactionStatus: (id: string, status: Transaction['status'], step?: number) => Promise<void>;
   deleteTransaction: (id: string, reason?: string) => Promise<void>;
@@ -325,58 +329,16 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  // Helper to seed initial sample data into Firestore
+  // Helper to synchronize administrative locations and settings to Firestore (No sample mock data)
   const seedInitialDataToFirestore = async (forceCleanOld: boolean = false) => {
     if (!isFirebaseConfigured) return;
     try {
-      if (forceCleanOld) {
-        const collectionsToClear = [
-          'properties',
-          'users',
-          'teams',
-          'customers',
-          'appointments',
-          'propertyMatches',
-          'transactions',
-          'rentalDeals',
-          'rentalContracts',
-          'rentalPayments',
-          'commissions',
-          'auditLogs',
-          'notifications',
-        ];
-        for (const colName of collectionsToClear) {
-          try {
-            const snap = await getDocs(collection(db, colName));
-            for (const docItem of snap.docs) {
-              await deleteDoc(doc(db, colName, docItem.id));
-            }
-          } catch (clearErr) {
-            console.warn(`Notice while clearing ${colName}:`, clearErr);
-          }
-        }
-      }
-
       await setDoc(doc(db, 'settings', 'general'), DEFAULT_SYSTEM_SETTINGS, { merge: true });
-
-      for (const u of SAMPLE_USERS) await setDoc(doc(db, 'users', u.id), u, { merge: true });
-      for (const t of SAMPLE_TEAMS) await setDoc(doc(db, 'teams', t.id), t, { merge: true });
-      for (const p of SAMPLE_PROPERTIES) await setDoc(doc(db, 'properties', p.id), p, { merge: true });
-      for (const c of SAMPLE_CUSTOMERS) await setDoc(doc(db, 'customers', c.id), c, { merge: true });
-      for (const a of SAMPLE_APPOINTMENTS) await setDoc(doc(db, 'appointments', a.id), a, { merge: true });
-      for (const m of SAMPLE_MATCHES) await setDoc(doc(db, 'propertyMatches', m.id), m, { merge: true });
-      for (const tr of SAMPLE_TRANSACTIONS) await setDoc(doc(db, 'transactions', tr.id), tr, { merge: true });
-      for (const rd of SAMPLE_RENTAL_DEALS) await setDoc(doc(db, 'rentalDeals', rd.id), rd, { merge: true });
-      for (const rc of SAMPLE_RENTAL_CONTRACTS) await setDoc(doc(db, 'rentalContracts', rc.id), rc, { merge: true });
-      for (const rp of SAMPLE_RENTAL_PAYMENTS) await setDoc(doc(db, 'rentalPayments', rp.id), rp, { merge: true });
-      for (const cm of SAMPLE_COMMISSIONS) await setDoc(doc(db, 'commissions', cm.id), cm, { merge: true });
-      for (const lg of SAMPLE_AUDIT_LOGS) await setDoc(doc(db, 'auditLogs', lg.id), lg, { merge: true });
-      for (const nf of SAMPLE_NOTIFICATIONS) await setDoc(doc(db, 'notifications', nf.id), nf, { merge: true });
-      for (const loc of MASTER_LOCATIONS) await setDoc(doc(db, 'locations', loc.id), loc, { merge: true });
-
-      success('Đã đồng bộ toàn bộ cơ sở dữ liệu lên Cloud Firestore');
-    } catch (err: any) {
-      console.warn('Notice during Firestore data synchronization:', err?.message || err);
+      for (const loc of MASTER_LOCATIONS) {
+        await setDoc(doc(db, 'locations', loc.id), loc, { merge: true });
+      }
+    } catch (err) {
+      console.warn('Sync locations notice:', err);
     }
   };
 
@@ -609,17 +571,42 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   }, [currentUser?.id, isFirebaseConfigured]);
 
+  // Clean orphaned commissions automatically (commissions referencing non-existent dealId)
+  useEffect(() => {
+    if (!isFirebaseConfigured || commissions.length === 0) return;
+    if (transactions.length === 0 && rentalDeals.length === 0) return;
+
+    const validDealIds = new Set([
+      ...transactions.map((t) => t.id),
+      ...rentalDeals.map((r) => r.id),
+    ]);
+
+    const orphaned = commissions.filter((c) => !c.dealId || !validDealIds.has(c.dealId));
+    if (orphaned.length > 0) {
+      console.warn(`[Clean Orphan Commissions] Detected ${orphaned.length} orphaned commissions. Deleting from Firestore...`);
+      for (const orphan of orphaned) {
+        deleteDoc(doc(db, 'commissions', orphan.id)).catch((err) => {
+          console.warn('Failed to delete orphaned commission:', orphan.id, err);
+        });
+      }
+      setCommissions((prev) => prev.filter((c) => c.dealId && validDealIds.has(c.dealId)));
+    }
+  }, [commissions.length, transactions.length, rentalDeals.length, isFirebaseConfigured]);
+
   const resetFilters = () => {
     setFilterState(defaultFilterState);
   };
 
   const resetDemoData = async () => {
     if (!currentUser || currentUser.role !== 'ADMIN') {
-      error('Từ chối quyền', 'Chỉ Quản trị viên mới có quyền nạp lại dữ liệu.');
+      error('Từ chối quyền', 'Chỉ Quản trị viên mới có quyền thực hiện thao tác này.');
       return;
     }
-    await seedInitialDataToFirestore(true);
-    success('Đã nạp lại bộ dữ liệu chuẩn', 'Dữ liệu bất động sản, khách hàng và nhân sự đã được đồng bộ lên Firestore.');
+    // Only synchronize master administrative locations - Zero sample data injection
+    for (const loc of MASTER_LOCATIONS) {
+      await setDoc(doc(db, 'locations', loc.id), loc, { merge: true });
+    }
+    success('Đã chuẩn hóa địa bàn', 'Danh mục địa bàn hành chính An Giang đã được đồng bộ.');
   };
 
   // Duplicate Check logic for Properties
@@ -785,13 +772,16 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     if (oldProp) {
+      const isStatusChange = Boolean(data.status && data.status !== oldProp.status);
       await addAuditLog({
-        action: 'UPDATE',
+        action: isStatusChange ? 'STATUS_CHANGE' : 'UPDATE',
         module: 'PROPERTIES',
         recordId: id,
         recordCode: oldProp.code,
         recordName: oldProp.title,
-        description: `Cập nhật thông tin bất động sản ${oldProp.code}`,
+        description: isStatusChange
+          ? `Đổi trạng thái bất động sản ${oldProp.code} từ "${oldProp.status}" sang "${data.status}"`
+          : `Cập nhật thông tin bất động sản ${oldProp.code}`,
         oldData: oldProp,
         newData: data,
         level: 'INFO',
@@ -837,21 +827,36 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const restoreProperty = async (id: string): Promise<void> => {
+    const prop = properties.find((p) => p.id === id);
     const updateData = {
       isDeleted: false,
-      deletedAt: undefined,
-      deletedBy: undefined,
-      deleteReason: undefined,
+      deletedAt: null,
+      deletedBy: null,
+      deleteReason: null,
+      updatedAt: new Date().toISOString(),
     };
-
-    setProperties((prev) => prev.map((p) => (p.id === id ? { ...p, ...updateData } : p)));
 
     if (isFirebaseConfigured) {
       try {
-        await updateDoc(doc(db, 'properties', id), updateData as any);
-      } catch (err) {
-        console.error(err);
+        await updateDoc(doc(db, 'properties', id), cleanUndefined(updateData) as any);
+      } catch (err: any) {
+        console.error('[restoreProperty] Firestore update error:', err);
+        throw new Error(`Lỗi khi khôi phục bất động sản: ${err.message || 'Lỗi kết nối'}`);
       }
+    }
+
+    setProperties((prev) => prev.map((p) => (p.id === id ? { ...p, ...updateData } : p)));
+
+    if (prop) {
+      await addAuditLog({
+        action: 'RESTORE',
+        module: 'PROPERTIES',
+        recordId: id,
+        recordCode: prop.code,
+        recordName: prop.title,
+        description: `Khôi phục bất động sản ${prop.code} (${prop.title}) từ thùng rác`,
+        level: 'INFO',
+      });
     }
 
     success('Khôi phục thành công', 'Bất động sản đã được đưa trở lại danh sách hoạt động.');
@@ -889,6 +894,17 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
       }
     }
+
+    await addAuditLog({
+      action: 'STATUS_CHANGE',
+      module: 'PROPERTIES',
+      recordId: ids[0] || 'bulk',
+      recordCode: `BULK_${ids.length}`,
+      recordName: `${ids.length} Bất động sản`,
+      description: `Đổi trạng thái hàng loạt cho ${ids.length} bất động sản sang "${status}"`,
+      newData: { status, affectedIds: ids },
+      level: 'INFO',
+    });
 
     success(`Đã chuyển trạng thái ${ids.length} BĐS`, `Tất cả đã chuyển sang "${status}"`);
   };
@@ -1157,6 +1173,24 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     setCustomers((prev) => prev.map((c) => (c.id === id ? { ...c, ...cleanData } : c)));
+
+    const oldCust = customers.find((c) => c.id === id);
+    const isStatusChange = Boolean(data.status && oldCust && data.status !== oldCust.status);
+
+    await addAuditLog({
+      action: isStatusChange ? 'STATUS_CHANGE' : 'UPDATE',
+      module: 'CUSTOMERS',
+      recordId: id,
+      recordCode: oldCust?.code || id,
+      recordName: oldCust?.fullName || 'Khách hàng',
+      description: isStatusChange
+        ? `Đổi trạng thái khách hàng ${oldCust?.code} (${oldCust?.fullName}) từ "${oldCust?.status}" sang "${data.status}"`
+        : `Cập nhật thông tin khách hàng ${oldCust?.code} (${oldCust?.fullName})`,
+      oldData: oldCust,
+      newData: cleanData,
+      level: 'INFO',
+    });
+
     success('Cập nhật khách hàng thành công');
   };
 
@@ -1195,20 +1229,38 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const restoreCustomer = async (id: string): Promise<void> => {
+    const cust = customers.find((c) => c.id === id);
     const updateData = {
       isDeleted: false,
-      deletedAt: undefined,
-      deletedBy: undefined,
-      deleteReason: undefined,
+      deletedAt: null,
+      deletedBy: null,
+      deleteReason: null,
+      updatedAt: new Date().toISOString(),
     };
-    setCustomers((prev) => prev.map((c) => (c.id === id ? { ...c, ...updateData } : c)));
+
     if (isFirebaseConfigured) {
       try {
-        await updateDoc(doc(db, 'customers', id), updateData as any);
-      } catch (err) {
-        console.error(err);
+        await updateDoc(doc(db, 'customers', id), cleanUndefined(updateData) as any);
+      } catch (err: any) {
+        console.error('[restoreCustomer] Firestore update error:', err);
+        throw new Error(`Lỗi khi khôi phục khách hàng: ${err.message || 'Lỗi kết nối'}`);
       }
     }
+
+    setCustomers((prev) => prev.map((c) => (c.id === id ? { ...c, ...updateData } : c)));
+
+    if (cust) {
+      await addAuditLog({
+        action: 'RESTORE',
+        module: 'CUSTOMERS',
+        recordId: id,
+        recordCode: cust.code,
+        recordName: cust.fullName,
+        description: `Khôi phục khách hàng ${cust.code} (${cust.fullName}) từ thùng rác`,
+        level: 'INFO',
+      });
+    }
+
     success('Khôi phục khách hàng thành công');
   };
 
@@ -1305,6 +1357,18 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
       }
     }
+
+    await addAuditLog({
+      action: 'STATUS_CHANGE',
+      module: 'CUSTOMERS',
+      recordId: customerIds[0] || 'bulk',
+      recordCode: `BULK_${customerIds.length}`,
+      recordName: `${customerIds.length} khách hàng`,
+      description: `Đổi trạng thái hàng loạt cho ${customerIds.length} khách hàng sang "${status}"`,
+      newData: { status, affectedIds: customerIds },
+      level: 'INFO',
+    });
+
     success(`Đã cập nhật trạng thái ${customerIds.length} khách hàng`);
   };
 
@@ -1393,46 +1457,56 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const now = new Date().toISOString();
 
     const agent = users.find((u) => u.id === appointmentData.assignedAgentId);
-    const newAppointment: Appointment = {
+    const sanitizedAppointment: Appointment = cleanUndefined({
       ...appointmentData,
       id: newId,
       code: newCode,
       agentName: agent?.fullName || currentUser?.fullName || 'Môi giới',
-      teamId: agent?.teamId,
+      teamId: appointmentData.teamId || agent?.teamId || currentUser?.teamId || null,
+      propertyId: appointmentData.propertyId || null,
+      propertyCode: appointmentData.propertyCode || null,
+      propertyAddress: appointmentData.propertyAddress || null,
+      customerId: appointmentData.customerId || null,
+      customerName: appointmentData.customerName || 'Khách hàng',
+      customerPhone: appointmentData.customerPhone || null,
+      notes: appointmentData.notes || null,
       createdAt: now,
-    };
+    });
 
-    setAppointments((prev) => [newAppointment, ...prev]);
     if (isFirebaseConfigured) {
       try {
-        await setDoc(doc(db, 'appointments', newId), newAppointment);
-      } catch (err) {
-        console.error(err);
+        await setDoc(doc(db, 'appointments', newId), sanitizedAppointment);
+      } catch (err: any) {
+        console.error('[addAppointment] Firestore setDoc error:', err);
+        throw new Error(`Lỗi khi lưu lịch hẹn vào Firestore: ${err.message || 'Lỗi kết nối'}`);
       }
     }
+
+    // Only update local state after Firestore write completes successfully
+    setAppointments((prev) => [sanitizedAppointment, ...prev.filter((a) => a.id !== newId)]);
 
     await addAuditLog({
       action: 'CREATE',
       module: 'APPOINTMENTS',
       recordId: newId,
       recordCode: newCode,
-      recordName: newAppointment.title,
-      description: `Lên lịch hẹn mới: [${newAppointment.type}] ${newAppointment.title}`,
+      recordName: sanitizedAppointment.title,
+      description: `Lên lịch hẹn mới: [${sanitizedAppointment.type}] ${sanitizedAppointment.title}`,
       level: 'INFO',
     });
 
     // Notify agent
     await addNotification({
       title: 'Lịch hẹn mới được phân công',
-      content: `${newAppointment.title} lúc ${newAppointment.startTime || ''} ${newAppointment.startDate || ''}`,
+      content: `${sanitizedAppointment.title} lúc ${sanitizedAppointment.startTime || ''} ${sanitizedAppointment.startDate || ''}`,
       type: 'APPOINTMENT',
       link: '/appointments',
-      recipientId: newAppointment.assignedAgentId,
+      recipientId: sanitizedAppointment.assignedAgentId,
       isRead: false,
     });
 
-    success('Tạo lịch hẹn thành công', `Đã lên lịch "${newAppointment.title}"`);
-    return newAppointment;
+    success('Tạo lịch hẹn thành công', `Đã lên lịch "${sanitizedAppointment.title}"`);
+    return sanitizedAppointment;
   };
 
   const updateAppointment = async (id: string, data: Partial<Appointment>): Promise<void> => {
@@ -1483,36 +1557,84 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     success('Đã hoàn thành buổi hẹn', 'Đã ghi nhận kết quả và phản hồi khách hàng.');
   };
 
-  // Transaction Actions (Bán & Sang nhượng)
-  const addTransaction = async (transData: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'>): Promise<Transaction> => {
+  // Transaction Actions (Bán & Sang nhượng) - Atomic with Commission Draft
+  const addTransaction = async (
+    transData: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'>,
+    commissionDraft?: Omit<Commission, 'id' | 'dealId' | 'dealCode' | 'createdAt' | 'updatedAt'>
+  ): Promise<{ transaction: Transaction; commission?: Commission }> => {
     const sequence = transactions.length + 1;
     const newCode = `GD-AG${sequence.toString().padStart(4, '0')}`;
     const newId = `trans_${Date.now()}`;
     const now = new Date().toISOString();
 
-    const newTrans: Transaction = {
+    const sanitizedTrans: Transaction = cleanUndefined({
       ...transData,
       id: newId,
       code: newCode,
+      notarizationDate: transData.notarizationDate || null,
+      handoverDate: transData.handoverDate || null,
+      teamId: transData.teamId || null,
+      notes: transData.notes || null,
       createdAt: now,
       updatedAt: now,
-      createdBy: currentUser?.id,
-    };
+      createdBy: currentUser?.id || null,
+    });
 
-    setTransactions((prev) => [newTrans, ...prev]);
+    let newCommission: Commission | undefined;
+    if (commissionDraft) {
+      const commSeq = commissions.length + 1;
+      const commCode = `HH-AG${commSeq.toString().padStart(4, '0')}`;
+      const commId = `comm_${Date.now()}`;
+      newCommission = cleanUndefined({
+        ...commissionDraft,
+        id: commId,
+        code: commCode,
+        dealId: newId,
+        dealCode: newCode,
+        createdAt: now,
+        updatedAt: now,
+        createdBy: currentUser?.id || null,
+      });
+    }
+
+    // Atomic execution via Firestore writeBatch so Transaction and Commission succeed or fail together
     if (isFirebaseConfigured) {
       try {
-        await setDoc(doc(db, 'transactions', newId), newTrans);
-      } catch (err) {
-        console.error(err);
+        const batch = writeBatch(db);
+        batch.set(doc(db, 'transactions', newId), sanitizedTrans);
+        if (newCommission) {
+          batch.set(doc(db, 'commissions', newCommission.id), newCommission);
+        }
+        if (sanitizedTrans.status === 'Đã đặt cọc' && sanitizedTrans.propertyId) {
+          batch.update(doc(db, 'properties', sanitizedTrans.propertyId), {
+            status: 'Đã nhận cọc',
+            updatedAt: now,
+          });
+        } else if (sanitizedTrans.status === 'Hoàn tất' && sanitizedTrans.propertyId) {
+          batch.update(doc(db, 'properties', sanitizedTrans.propertyId), {
+            status: sanitizedTrans.type === 'SALE' ? 'Đã bán' : 'Đã sang nhượng',
+            updatedAt: now,
+          });
+        }
+        await batch.commit();
+      } catch (err: any) {
+        console.error('[addTransaction] Atomic writeBatch commit error:', err);
+        throw new Error(`Lỗi khi lưu giao dịch vào Firestore: ${err.message || 'Lỗi kết nối'}`);
       }
     }
 
-    // Auto-update property status if deposit or sale
-    if (newTrans.status === 'Đã đặt cọc') {
-      await updatePropertyStatus(newTrans.propertyId, 'Đã nhận cọc');
-    } else if (newTrans.status === 'Hoàn tất') {
-      await updatePropertyStatus(newTrans.propertyId, newTrans.type === 'SALE' ? 'Đã bán' : 'Đã sang nhượng');
+    // ONLY update local state AFTER Firestore batch write succeeds
+    setTransactions((prev) => [sanitizedTrans, ...prev.filter((t) => t.id !== newId)]);
+    if (newCommission) {
+      setCommissions((prev) => [newCommission!, ...prev.filter((c) => c.id !== newCommission!.id)]);
+    }
+    if (sanitizedTrans.propertyId) {
+      const newPropStatus = sanitizedTrans.status === 'Đã đặt cọc' ? 'Đã nhận cọc' : sanitizedTrans.status === 'Hoàn tất' ? (sanitizedTrans.type === 'SALE' ? 'Đã bán' : 'Đã sang nhượng') : undefined;
+      if (newPropStatus) {
+        setProperties((prev) =>
+          prev.map((p) => (p.id === sanitizedTrans.propertyId ? { ...p, status: newPropStatus as PropertyStatus, updatedAt: now } : p))
+        );
+      }
     }
 
     await addAuditLog({
@@ -1520,14 +1642,13 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       module: 'TRANSACTIONS',
       recordId: newId,
       recordCode: newCode,
-      recordName: newTrans.propertyTitle,
-      description: `Tạo giao dịch [${newTrans.type === 'SALE' ? 'Bán BĐS' : 'Sang nhượng'}] mã ${newCode} cho căn ${newTrans.propertyCode}`,
-      newData: newTrans,
+      recordName: sanitizedTrans.propertyTitle,
+      description: `Tạo giao dịch [${sanitizedTrans.type === 'SALE' ? 'Bán BĐS' : 'Sang nhượng'}] mã ${newCode} cho căn ${sanitizedTrans.propertyCode}${newCommission ? ' kèm phân chia hoa hồng ' + newCommission.code : ''}`,
+      newData: sanitizedTrans,
       level: 'INFO',
     });
 
-    success('Tạo giao dịch thành công', `Đã lưu giao dịch ${newCode}`);
-    return newTrans;
+    return { transaction: sanitizedTrans, commission: newCommission };
   };
 
   const updateTransaction = async (id: string, data: Partial<Transaction>): Promise<void> => {

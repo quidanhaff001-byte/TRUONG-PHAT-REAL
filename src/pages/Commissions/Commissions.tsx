@@ -26,6 +26,8 @@ import { Badge } from '../../components/common/Badge';
 export const Commissions: React.FC = () => {
   const {
     commissions,
+    transactions,
+    rentalDeals,
     users,
     updateCommissionSplitPaid,
     recordCommissionCollection,
@@ -41,6 +43,16 @@ export const Commissions: React.FC = () => {
   const [collectAmount, setCollectAmount] = useState<number>(0);
   const [selectedRecord, setSelectedRecord] = useState<CommissionRecord | null>(null);
 
+  // Exclude orphaned commissions (deals that no longer exist)
+  const validCommissions = useMemo(() => {
+    if (transactions.length === 0 && rentalDeals.length === 0) return commissions;
+    const validDealIds = new Set([
+      ...transactions.map((t) => t.id),
+      ...rentalDeals.map((r) => r.id),
+    ]);
+    return commissions.filter((c) => c.dealId && validDealIds.has(c.dealId));
+  }, [commissions, transactions, rentalDeals]);
+
   // Financial calculations
   const stats = useMemo(() => {
     let totalExpected = 0;
@@ -49,7 +61,7 @@ export const Commissions: React.FC = () => {
     let myEarned = 0;
     let myPaid = 0;
 
-    commissions.forEach((c) => {
+    validCommissions.forEach((c) => {
       totalExpected += c.totalExpectedCommission || 0;
       totalCollected += c.collectedAmount || 0;
 
@@ -73,11 +85,11 @@ export const Commissions: React.FC = () => {
       myPaid,
       myUnpaid: myEarned - myPaid,
     };
-  }, [commissions, currentUser]);
+  }, [validCommissions, currentUser]);
 
   // Filtered Commission Records
   const filteredCommissions = useMemo(() => {
-    return commissions.filter((c) => {
+    return validCommissions.filter((c) => {
       // Role filtering: Agents only see records where they have a split
       if (currentUser?.role === 'AGENT') {
         const hasMySplit = c.splits?.some((s) => s.beneficiaryId === currentUser.id);

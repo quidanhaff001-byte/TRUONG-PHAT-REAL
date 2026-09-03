@@ -13,6 +13,7 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { useToast } from './ToastContext';
+import { sendAuditLogToBackend } from '../services/auditLogService';
 
 interface AuthContextType {
   currentUser: User | null;
@@ -205,6 +206,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       success('Đăng nhập thành công', `Chào mừng ${verifiedProfile.fullName} (${getRoleName(verifiedProfile.role)})`);
+      sendAuditLogToBackend({
+        action: 'LOGIN',
+        module: 'USERS',
+        recordId: verifiedProfile.id,
+        recordCode: verifiedProfile.employeeCode,
+        recordName: verifiedProfile.fullName,
+        description: `Người dùng ${verifiedProfile.fullName} (${verifiedProfile.employeeCode}) đăng nhập thành công`,
+        userId: verifiedProfile.id,
+        userName: verifiedProfile.fullName,
+        userEmail: verifiedProfile.email,
+        userRole: verifiedProfile.role,
+        level: 'INFO',
+      });
       return true;
     } catch (fbAuthErr: any) {
       console.warn('Firebase login attempt failed:', fbAuthErr.code, fbAuthErr.message);
@@ -247,6 +261,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const verified = await syncUserProfile(result.user);
       if (!verified) return false;
       success('Đăng nhập Google thành công');
+      sendAuditLogToBackend({
+        action: 'LOGIN',
+        module: 'USERS',
+        recordId: verified.id,
+        recordCode: verified.employeeCode,
+        recordName: verified.fullName,
+        description: `Người dùng ${verified.fullName} (${verified.employeeCode}) đăng nhập bằng Google`,
+        userId: verified.id,
+        userName: verified.fullName,
+        userEmail: verified.email,
+        userRole: verified.role,
+        level: 'INFO',
+      });
       return true;
     } catch (err: any) {
       error('Đăng nhập Google thất bại', err.message || 'Lỗi đăng nhập Google');
@@ -257,6 +284,21 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const logout = async () => {
+    if (currentUser) {
+      sendAuditLogToBackend({
+        action: 'LOGOUT',
+        module: 'USERS',
+        recordId: currentUser.id,
+        recordCode: currentUser.employeeCode,
+        recordName: currentUser.fullName,
+        description: `Người dùng ${currentUser.fullName} (${currentUser.employeeCode}) đăng xuất khỏi hệ thống`,
+        userId: currentUser.id,
+        userName: currentUser.fullName,
+        userEmail: currentUser.email,
+        userRole: currentUser.role,
+        level: 'INFO',
+      });
+    }
     try {
       localStorage.removeItem('tp_current_user');
       sessionStorage.removeItem('tp_current_user');

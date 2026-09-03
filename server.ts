@@ -9,7 +9,15 @@ import { getAuth, Auth, UserRecord } from 'firebase-admin/auth';
 const app = express();
 const PORT = 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+
+// Ensure upload directory exists for hosting upload (Firebase Spark compatibility)
+const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+app.use('/uploads', express.static(uploadsDir));
 
 // CORS & Preflight handling for all /api endpoints
 app.use((req, res, next) => {
@@ -184,6 +192,49 @@ app.post('/api/audit-log', async (req: Request, res: Response): Promise<void> =>
   } catch (err: any) {
     console.error('[api/audit-log] Error recording log:', err.message);
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// API Endpoint for Hosting Image Upload (Spark plan compatible)
+app.post('/api/upload-image', (req: Request, res: Response): void => {
+  try {
+    const { base64Data, fileName, propertyId } = req.body;
+    if (!base64Data) {
+      res.status(400).json({ success: false, error: 'Thiếu dữ liệu ảnh' });
+      return;
+    }
+
+    const matches = base64Data.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+    let buffer: Buffer;
+    let ext = 'jpg';
+
+    if (matches && matches.length === 3) {
+      const mime = matches[1];
+      if (mime.includes('png')) ext = 'png';
+      else if (mime.includes('webp')) ext = 'webp';
+      buffer = Buffer.from(matches[2], 'base64');
+    } else {
+      buffer = Buffer.from(base64Data, 'base64');
+    }
+
+    const cleanName = (fileName || 'image')
+      .replace(/[^a-zA-Z0-9_-]/g, '_')
+      .substring(0, 40);
+    const uniqueName = `${propertyId || 'prop'}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}.${ext}`;
+    const filePath = path.join(uploadsDir, uniqueName);
+
+    fs.writeFileSync(filePath, buffer);
+
+    const publicUrl = `/uploads/${uniqueName}`;
+    res.json({
+      success: true,
+      url: publicUrl,
+      fileName: uniqueName,
+      size: buffer.length,
+    });
+  } catch (err: any) {
+    console.error('[Hosting Upload] Error saving file:', err.message);
+    res.status(500).json({ success: false, error: err.message || 'Lỗi lưu trữ tệp trên hosting' });
   }
 });
 function validatePasswordComplexity(password: string): { valid: boolean; reason?: string } {
