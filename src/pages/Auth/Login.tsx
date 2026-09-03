@@ -16,9 +16,9 @@ import { Logo } from '../../components/common/Logo';
 export const Login: React.FC = () => {
   const { loginWithEmail, loginWithGoogle, resetPassword } = useAuth();
 
-  // Input states - pre-filled with activated Admin credentials
-  const [accountInput, setAccountInput] = useState<string>('quidanh.aff001@gmail.com');
-  const [password, setPassword] = useState<string>('Admin@123456');
+  // Input states - purely user entered, no hardcoded credentials
+  const [accountInput, setAccountInput] = useState<string>('');
+  const [password, setPassword] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [rememberMe, setRememberMe] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -98,23 +98,6 @@ export const Login: React.FC = () => {
               <span className="leading-relaxed">{errorMessage}</span>
             </div>
           )}
-
-          {/* Admin Credentials Info Banner */}
-          <div className="mt-4 p-3.5 bg-[#070e1c] border border-[#D4AF37]/40 rounded-xl text-xs space-y-2">
-            <div className="flex items-center justify-between text-[#D4AF37] font-bold">
-              <span className="flex items-center gap-1.5">
-                <ShieldCheck className="w-4 h-4 text-[#D4AF37]" />
-                Tài khoản Quản trị viên (Admin)
-              </span>
-              <span className="px-2 py-0.5 rounded bg-[#D4AF37]/15 text-[10px] uppercase font-mono tracking-wider text-[#D4AF37]">
-                Đã kích hoạt
-              </span>
-            </div>
-            <div className="text-[11px] text-slate-300 space-y-1 font-mono bg-black/40 p-2 rounded-lg border border-[#1E3A5F]/40">
-              <div>Email: <strong className="text-white">quidanh.aff001@gmail.com</strong></div>
-              <div>Mật khẩu: <strong className="text-[#D4AF37]">Admin@123456</strong></div>
-            </div>
-          </div>
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4 mt-5">

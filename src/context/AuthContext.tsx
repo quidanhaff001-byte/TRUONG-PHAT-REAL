@@ -54,34 +54,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const userDocRef = doc(db, 'users', fbUser.uid);
       const userSnap = await getDoc(userDocRef);
 
-      // Requirement 9: Nếu không có users/{uid} -> kiểm tra tài khoản Admin gốc hoặc đăng xuất
+      // Requirement 9: Nếu không có users/{uid} -> đăng xuất ngay
       if (!userSnap.exists()) {
-        if (fbUser.email === 'quidanh.aff001@gmail.com') {
-          const adminDoc: User = {
-            id: fbUser.uid,
-            uid: fbUser.uid,
-            employeeCode: 'ADMIN-001',
-            fullName: fbUser.displayName || 'Nguyễn Văn Quản Trị',
-            email: 'quidanh.aff001@gmail.com',
-            phone: '0919 414 884',
-            role: 'ADMIN',
-            status: 'ACTIVE',
-            startDate: '2022-01-01',
-            notes: 'Quản trị viên toàn hệ thống BDS Trường Phát Real - Chi nhánh An Giang',
-            createdAt: new Date().toISOString(),
-            lastLoginAt: new Date().toISOString(),
-          };
-          await setDoc(userDocRef, adminDoc, { merge: true });
-          setCurrentUser(adminDoc);
-          return adminDoc;
-        }
-
-        console.warn(`Tài khoản ${fbUser.uid} (${fbUser.email}) chưa có hồ sơ users/{uid} trên Firestore`);
+        console.warn(`Tài khoản ${fbUser.uid} chưa có hồ sơ users/{uid} trên Firestore`);
         await signOut(auth);
         setCurrentUser(null);
         error(
           'Chưa có hồ sơ nhân sự',
-          `Tài khoản (${fbUser.email}) chưa có hồ sơ nhân viên trong hệ thống (users/${fbUser.uid}). Vui lòng liên hệ Quản trị viên để được tạo hồ sơ.`
+          `Tài khoản (${fbUser.email || fbUser.uid}) chưa có hồ sơ nhân viên trong hệ thống (users/${fbUser.uid}). Vui lòng liên hệ Quản trị viên để được tạo hồ sơ.`
         );
         return null;
       }
@@ -105,17 +85,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return null;
       }
 
-      const isDefaultAdmin =
-        fbUser.email === 'quidanh.aff001@gmail.com' ||
-        firestoreData.role === 'ADMIN';
-
-      const effectiveRole: UserRole = isDefaultAdmin ? 'ADMIN' : firestoreData.role;
-
       const verifiedUser: User = {
         ...firestoreData,
         id: fbUser.uid,
         uid: fbUser.uid,
-        role: effectiveRole,
+        role: firestoreData.role,
         email: fbUser.email || firestoreData.email,
         lastLoginAt: new Date().toISOString(),
       };
@@ -350,7 +324,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     error('Tính năng bị khóa', 'Cơ chế tài khoản mẫu đã bị vô hiệu hóa.');
   };
 
-  const isAdmin = currentUser?.role === 'ADMIN' || currentUser?.email === 'quidanh.aff001@gmail.com';
+  const isAdmin = currentUser?.role === 'ADMIN';
   const isTeamLeader = currentUser?.role === 'TEAM_LEADER' || isAdmin;
   const isAgent = currentUser?.role === 'AGENT';
   const mustChangePassword = Boolean(currentUser?.mustChangePassword);

@@ -14,7 +14,6 @@ service cloud.firestore {
     // 1. Quản trị viên (ADMIN) - Toàn quyền hệ thống
     function isAdmin() {
       return isSignedIn() && (
-        request.auth.token.email == 'quidanh.aff001@gmail.com' ||
         getUserClaimRole() == 'ADMIN' ||
         request.auth.token.admin == true ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&

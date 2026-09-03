@@ -11,6 +11,14 @@ const PORT = 3000;
 
 app.use(express.json());
 
+// Set global JSON header and Request ID for all /api endpoints
+app.use('/api', (req, res, next) => {
+  res.setHeader('Content-Type', 'application/json');
+  const reqId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  res.setHeader('X-Request-Id', reqId);
+  next();
+});
+
 // 1. Initialize Firebase Admin SDK
 let firebaseAdminApp: App | null = null;
 let adminDb: Firestore | null = null;
@@ -155,14 +163,11 @@ async function requireAdminAuth(req: AuthenticatedRequest, res: Response, next: 
   }
 
   if (!adminAuth || !adminDb) {
-    // If admin SDK is not fully loaded, allow fallback in development if token is present
-    req.adminUser = {
-      uid: 'system-admin',
-      email: 'quidanh.aff001@gmail.com',
-      name: 'Quản trị viên TRUONG PHAT',
-      role: 'ADMIN',
-    };
-    return next();
+    res.status(500).json({
+      success: false,
+      error: 'Dịch vụ xác thực Quản trị viên phía máy chủ chưa sẵn sàng. Vui lòng thử lại sau.',
+    });
+    return;
   }
 
   try {
@@ -173,22 +178,14 @@ async function requireAdminAuth(req: AuthenticatedRequest, res: Response, next: 
     // Check Custom Claim first
     let role = (decodedToken.role as string) || (decodedToken.admin ? 'ADMIN' : '');
 
-    // Check Firestore user doc or default admin email if claim is not present
+    // Check Firestore user doc if claim is not present
     if (role !== 'ADMIN') {
-      if (email === 'quidanh.aff001@gmail.com' || email.toLowerCase().includes('admin')) {
+      const userDoc = await adminDb.collection('users').doc(uid).get();
+      if (userDoc.exists && userDoc.data()?.role === 'ADMIN') {
         role = 'ADMIN';
-        // Auto-assign custom claim for future requests
         try {
           await adminAuth.setCustomUserClaims(uid, { role: 'ADMIN', admin: true });
         } catch (e) {}
-      } else {
-        const userDoc = await adminDb.collection('users').doc(uid).get();
-        if (userDoc.exists && userDoc.data()?.role === 'ADMIN') {
-          role = 'ADMIN';
-          try {
-            await adminAuth.setCustomUserClaims(uid, { role: 'ADMIN', admin: true });
-          } catch (e) {}
-        }
       }
     }
 
@@ -1093,6 +1090,25 @@ app.get('/api/health', (req: Request, res: Response) => {
     status: 'ok',
     adminConfigured: Boolean(adminAuth && adminDb),
     timestamp: new Date().toISOString(),
+  });
+});
+
+// Fallback 404 handler specifically for /api routes so they NEVER return HTML
+app.all('/api/*', (req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.status(404).json({
+    success: false,
+    error: `Đường dẫn API không tồn tại (${req.method} ${req.path})`,
+  });
+});
+
+// Global API error handler
+app.use('/api', (err: any, req: Request, res: Response, next: NextFunction) => {
+  res.setHeader('Content-Type', 'application/json');
+  console.error(`[API Error Handler] ${req.method} ${req.path}:`, err);
+  res.status(500).json({
+    success: false,
+    error: 'Lỗi máy chủ nội bộ. Vui lòng thử lại sau.',
   });
 });
 
