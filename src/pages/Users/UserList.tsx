@@ -96,12 +96,10 @@ export const UserList: React.FC = () => {
     sendResetEmailAfterCreation: true,
   });
 
-  // Created Account Result Modal (to display temporary credentials securely once)
+  // Created Account Result Modal (confirms account creation securely)
   const [createdAccountInfo, setCreatedAccountInfo] = useState<{
     user: any;
-    temporaryPassword?: string;
   } | null>(null);
-  const [copiedPass, setCopiedPass] = useState(false);
 
   // Role Change Modal State
   const [roleChangeTarget, setRoleChangeTarget] = useState<User | null>(null);
@@ -210,7 +208,7 @@ export const UserList: React.FC = () => {
         role: 'AGENT',
         teamId: teams[0]?.id || '',
         notes: '',
-        tempPassword: `TP@${Math.floor(100000 + Math.random() * 900000)}#Aa`,
+        tempPassword: '',
         sendResetEmailAfterCreation: true,
       });
     }
@@ -274,7 +272,7 @@ export const UserList: React.FC = () => {
         success('Tạo tài khoản thành công', `Tài khoản cho ${userFormData.fullName} đã được tạo trên hệ thống.`);
         setShowUserModal(false);
 
-        // Show credentials modal so Admin can copy temp password for the agent
+        // Show credentials confirmation modal
         setCreatedAccountInfo({
           user: result.user || {
             fullName: userFormData.fullName,
@@ -282,7 +280,6 @@ export const UserList: React.FC = () => {
             employeeCode: userFormData.employeeCode,
             role: userFormData.role,
           },
-          temporaryPassword: userFormData.tempPassword || result.temporaryPasswordGenerated,
         });
       }
     } catch (err: any) {
@@ -423,7 +420,6 @@ export const UserList: React.FC = () => {
         // Show credentials popup
         setCreatedAccountInfo({
           user: tempPassTarget,
-          temporaryPassword: newTempPassword.trim(),
         });
         setTempPassTarget(null);
       } catch (err: any) {
@@ -1159,15 +1155,19 @@ export const UserList: React.FC = () => {
 
                   <div>
                     <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                      Mật khẩu tạm thời (Tối thiểu 8 ký tự, hoa, thường, số & ký tự đặc biệt):
+                      Mật khẩu khởi tạo (Input bảo mật type="password"):
                     </label>
                     <input
-                      type="text"
+                      type="password"
+                      autoComplete="new-password"
                       value={userFormData.tempPassword}
                       onChange={(e) => setUserFormData({ ...userFormData, tempPassword: e.target.value })}
-                      placeholder="VD: TP@2026#Aa"
-                      className="w-full px-3 py-2 bg-white border border-amber-300 rounded-xl text-xs font-mono text-slate-900 focus:outline-none"
+                      placeholder="Nhập mật khẩu (tối thiểu 8 ký tự, có chữ hoa, thường, số, ký tự đặc biệt)"
+                      className="w-full px-3 py-2 bg-white border border-amber-300 rounded-xl text-xs font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-400"
                     />
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      Mật khẩu được mã hóa an toàn, không hiển thị dưới dạng văn bản và không lưu trên Firestore.
+                    </p>
                   </div>
 
                   <label className="flex items-center gap-2 cursor-pointer">
@@ -1259,29 +1259,14 @@ export const UserList: React.FC = () => {
                 <RoleBadge role={createdAccountInfo.user.role} />
               </div>
 
-              {createdAccountInfo.temporaryPassword && (
-                <div className="pt-2 border-t border-slate-200">
-                  <div className="text-[11px] font-bold text-slate-700 mb-1">Mật khẩu tạm thời:</div>
-                  <div className="flex items-center justify-between p-2.5 bg-amber-50 border border-amber-200 rounded-xl font-mono text-xs text-amber-900 font-bold">
-                    <span>{createdAccountInfo.temporaryPassword}</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        navigator.clipboard.writeText(createdAccountInfo.temporaryPassword!);
-                        setCopiedPass(true);
-                        setTimeout(() => setCopiedPass(false), 2000);
-                      }}
-                      className="p-1 hover:bg-amber-200 rounded-lg text-amber-800 transition-colors flex items-center gap-1 text-[11px] cursor-pointer"
-                    >
-                      {copiedPass ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span>{copiedPass ? 'Đã sao chép' : 'Sao chép'}</span>
-                    </button>
-                  </div>
-                  <p className="text-[10px] text-slate-500 mt-1">
-                    Nhân viên sẽ được yêu cầu đổi mật khẩu cá nhân mới ngay trong lần đăng nhập đầu tiên.
-                  </p>
+              <div className="pt-2 border-t border-slate-200">
+                <div className="flex items-start gap-2.5 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900 font-medium">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  <span>
+                    Mật khẩu đã được thiết lập bảo mật trực tiếp trên Firebase Authentication. Nhân viên có thể sử dụng thông tin tài khoản được cấp để đăng nhập ngay.
+                  </span>
                 </div>
-              )}
+              </div>
             </div>
 
             <div className="mt-5">
@@ -1522,23 +1507,16 @@ export const UserList: React.FC = () => {
 
             <div className="space-y-4 text-xs">
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Mật khẩu tạm thời mới *</label>
+                <label className="block font-bold text-slate-700 mb-1">Mật khẩu tạm thời mới (Input type="password") *</label>
                 <div className="relative">
                   <input
-                    type="text"
+                    type="password"
+                    autoComplete="new-password"
                     value={newTempPassword}
                     onChange={(e) => setNewTempPassword(e.target.value)}
-                    placeholder="VD: TP@987654#Aa"
-                    className="w-full pl-3 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-900 focus:outline-none focus:border-[#D4AF37]"
+                    placeholder="Nhập mật khẩu mới (tối thiểu 8 ký tự, hoa, thường, số, ký tự đặc biệt)"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-900 focus:outline-none focus:border-[#D4AF37]"
                   />
-                  <button
-                    type="button"
-                    onClick={() => setNewTempPassword(`TP@${Math.floor(100000 + Math.random() * 900000)}#Aa`)}
-                    title="Tạo ngẫu nhiên mật khẩu mạnh mới"
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                  </button>
                 </div>
                 <p className="text-[10px] text-slate-400 mt-1">
                   Yêu cầu: Tối thiểu 8 ký tự, gồm chữ in hoa, thường, chữ số và ký tự đặc biệt.

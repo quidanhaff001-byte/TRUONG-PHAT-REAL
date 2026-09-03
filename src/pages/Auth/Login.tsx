@@ -93,9 +93,27 @@ export const Login: React.FC = () => {
 
           {/* Error Message Alert */}
           {errorMessage && (
-            <div className="mt-4 p-3 bg-rose-500/15 border border-rose-500/30 rounded-xl text-rose-300 text-xs flex items-start gap-2.5 animate-in fade-in duration-200">
-              <AlertCircle className="w-4 h-4 shrink-0 text-rose-400 mt-0.5" />
-              <span className="leading-relaxed">{errorMessage}</span>
+            <div className="mt-4 p-3.5 bg-rose-500/15 border border-rose-500/30 rounded-xl text-xs space-y-2 animate-in fade-in duration-200">
+              <div className="flex items-start gap-2.5 text-rose-300">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-400 mt-0.5" />
+                <span className="leading-relaxed font-medium">{errorMessage}</span>
+              </div>
+              <div className="pt-2 border-t border-rose-500/20 text-slate-300 text-[11px] leading-relaxed flex flex-col gap-1.5">
+                <p>
+                  💡 <strong className="text-[#D4AF37]">Khuyên dùng:</strong> Nhấp nút{' '}
+                  <strong className="text-white">"Đăng nhập với Google"</strong> bên dưới để vào hệ thống ngay lập tức mà không cần mật khẩu.
+                </p>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const emailToSend = accountInput.trim() || 'quidanh.aff001@gmail.com';
+                    await resetPassword(emailToSend);
+                  }}
+                  className="text-left text-[#D4AF37] hover:underline font-semibold w-fit cursor-pointer"
+                >
+                  📩 Hoặc bấm đây để gửi liên kết đặt lại mật khẩu về email
+                </button>
+              </div>
             </div>
           )}
 
@@ -216,9 +234,9 @@ export const Login: React.FC = () => {
                 }
               }}
               disabled={isSubmitting}
-              className="w-full min-h-[46px] h-[46px] px-4 bg-[#070e1c] hover:bg-[#101b33] border border-[#1E3A5F] text-slate-200 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-60"
+              className="w-full min-h-[48px] h-12 px-4 bg-[#0e1b33] hover:bg-[#142547] border-2 border-[#D4AF37]/50 hover:border-[#D4AF37] text-white font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-60 shadow-md shadow-[#D4AF37]/5 group"
             >
-              <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+              <svg className="w-4 h-4 shrink-0 transition-transform group-hover:scale-110" viewBox="0 0 24 24">
                 <path
                   fill="#4285F4"
                   d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"
@@ -236,7 +254,10 @@ export const Login: React.FC = () => {
                   d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.34 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
                 />
               </svg>
-              <span>Đăng nhập với Google</span>
+              <span>Đăng nhập nhanh với Google</span>
+              <span className="ml-1 px-1.5 py-0.5 text-[10px] uppercase font-semibold tracking-wide bg-[#D4AF37]/20 text-[#D4AF37] rounded border border-[#D4AF37]/40">
+                1 chạm
+              </span>
             </button>
           </form>
 

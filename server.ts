@@ -11,6 +11,18 @@ const PORT = 3000;
 
 app.use(express.json());
 
+// CORS & Preflight handling for all /api endpoints
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Request-Id');
+  if (req.method === 'OPTIONS') {
+    res.status(204).end();
+    return;
+  }
+  next();
+});
+
 // Set global JSON header and Request ID for all /api endpoints
 app.use('/api', (req, res, next) => {
   res.setHeader('Content-Type', 'application/json');
@@ -113,7 +125,67 @@ function sanitizeForLog(data: any) {
   return clone;
 }
 
-// Password Complexity Validator
+// Endpoint ghi Audit Log qua Backend Admin SDK (bảo mật, không ghi undefined)
+app.post('/api/audit-log', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const authHeader = req.headers.authorization;
+    let actor = { uid: 'anonymous', email: '', name: 'Hệ thống', role: 'AGENT' };
+
+    if (authHeader && authHeader.startsWith('Bearer ') && adminAuth) {
+      try {
+        const token = authHeader.split('Bearer ')[1].trim();
+        const decoded = await adminAuth.verifyIdToken(token);
+        actor = {
+          uid: decoded.uid,
+          email: decoded.email || '',
+          name: decoded.name || decoded.email || 'Người dùng',
+          role: (decoded.role as string) || (decoded.admin ? 'ADMIN' : 'AGENT'),
+        };
+      } catch (tokenErr) {
+        // Fallback to body data if token decoding fails
+      }
+    }
+
+    const { action, module, description, details, recordId, recordCode, recordName, level, teamId, targetUserId, targetUserName, beforeData, afterData } = req.body;
+    const ip = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '127.0.0.1';
+    const userAgent = req.headers['user-agent'] || '';
+
+    const logId = `log_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const logDoc = {
+      id: logId,
+      timestamp: new Date().toISOString(),
+      userId: req.body.userId || actor.uid,
+      userName: req.body.userName || actor.name,
+      userEmail: req.body.userEmail || actor.email || '',
+      userRole: req.body.userRole || actor.role,
+      action: action || 'INFO',
+      module: module || 'SYSTEM',
+      details: details || description || '',
+      description: description || details || '',
+      recordId: recordId || '',
+      recordCode: recordCode || '',
+      recordName: recordName || '',
+      teamId: teamId || null,
+      targetUserId: targetUserId || '',
+      targetUserName: targetUserName || '',
+      beforeData: beforeData ? sanitizeForLog(beforeData) : null,
+      afterData: afterData ? sanitizeForLog(afterData) : null,
+      ipAddress: ip,
+      userAgent,
+      status: 'SUCCESS',
+      level: level || 'INFO',
+    };
+
+    if (adminDb) {
+      await adminDb.collection('auditLogs').doc(logId).set(logDoc);
+    }
+
+    res.json({ success: true, logId });
+  } catch (err: any) {
+    console.error('[api/audit-log] Error recording log:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 function validatePasswordComplexity(password: string): { valid: boolean; reason?: string } {
   if (!password || password.length < 8) {
     return { valid: false, reason: 'Mật khẩu phải có tối thiểu 8 ký tự' };
@@ -380,7 +452,7 @@ app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRe
       'SUCCESS'
     );
 
-    // Return sanitized response (never return password to client logs)
+    // Return sanitized response (never expose password in response, DOM, console or UI)
     res.json({
       success: true,
       message: 'Tạo tài khoản nhân viên thành công trên Firebase Authentication và Firestore.',
@@ -396,7 +468,6 @@ app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRe
         status: newUserDoc.status,
         mustChangePassword: true,
       },
-      temporaryPasswordGenerated: tempPassword ? undefined : initialPassword,
     });
   } catch (err: any) {
     console.error('[adminCreateUser] Error:', err);
@@ -1140,4 +1211,9 @@ async function startServer() {
   });
 }
 
-startServer();
+if (!process.env.VERCEL) {
+  startServer();
+}
+
+export default app;
+export { app };

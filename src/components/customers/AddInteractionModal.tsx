@@ -74,8 +74,8 @@ export const AddInteractionModal: React.FC<AddInteractionModalProps> = ({
         content: content.trim(),
         agentId: currentUser?.id || 'admin',
         agentName: currentUser?.fullName || 'Môi giới phụ trách',
-        nextActionDate: nextActionDate ? new Date(nextActionDate).toISOString() : undefined,
-        nextActionNote: nextActionNote.trim() || undefined,
+        nextActionDate: nextActionDate ? new Date(nextActionDate).toISOString() : null,
+        nextActionNote: nextActionNote.trim() || null,
       });
 
       // Update customer status if changed
@@ -162,7 +162,7 @@ export const AddInteractionModal: React.FC<AddInteractionModalProps> = ({
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="VD: Trao đổi thêm về phương thức thanh toán căn Thảo Điền"
+              placeholder="VD: Dẫn khách xem BĐS tại An Minh"
               className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:border-slate-900 ring-slate-200"
             />
           </div>

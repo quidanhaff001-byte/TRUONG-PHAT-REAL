@@ -52,38 +52,13 @@ export async function adminCreateUserApi(data: CreateUserInput): Promise<{ succe
       body: JSON.stringify(data),
     });
 
-    const resData = await parseResponseSafe<{ success: boolean; message: string; user?: User; temporaryPasswordGenerated?: string; error?: string }>(res, endpoint);
+    const resData = await parseResponseSafe<{ success: boolean; message: string; user?: User; error?: string }>(res, endpoint);
     if (!resData || !resData.success) {
       throw new Error(resData?.error || resData?.message || 'Không thể tạo nhân viên mới.');
     }
     return resData;
   } catch (err: any) {
-    // Nếu API backend không khả dụng (ví dụ deploy Vercel static), fallback tạo trực tiếp trên Firestore
-    if (err.message && (err.message.includes('không đúng định dạng') || err.message.includes('404'))) {
-      console.warn('Backend API không khả dụng, sử dụng cơ chế Firestore trực tiếp:', err.message);
-      const newUid = `emp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-      const newUserDoc: User = {
-        id: newUid,
-        uid: newUid,
-        employeeCode: data.employeeCode,
-        fullName: data.fullName,
-        email: data.email,
-        phone: data.phone,
-        role: data.role,
-        teamId: data.teamId,
-        teamName: data.teamName,
-        notes: data.notes,
-        status: 'ACTIVE',
-        createdAt: new Date().toISOString(),
-      };
-      await setDoc(doc(db, 'users', newUid), newUserDoc);
-      return {
-        success: true,
-        message: `Đã tạo hồ sơ nhân viên ${data.fullName} thành công.`,
-        user: newUserDoc,
-        temporaryPasswordGenerated: data.tempPassword || undefined,
-      };
-    }
+    console.error('[adminCreateUserApi] Error:', err.message);
     throw err;
   }
 }

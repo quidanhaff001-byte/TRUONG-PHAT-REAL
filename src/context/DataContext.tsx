@@ -41,6 +41,8 @@ import { useAuth } from './AuthContext';
 import { useToast } from './ToastContext';
 import { generatePropertyCode } from '../utils/formatters';
 import { isFirebaseConfigured, db } from '../config/firebase';
+import { cleanUndefined } from '../utils/firestoreSanitizer';
+import { sendAuditLogToBackend } from '../services/auditLogService';
 import {
   collection,
   onSnapshot,
@@ -239,10 +241,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [filterState, setFilterState] = useState<PropertyFilterState>(defaultFilterState);
 
-  // Helper to log user actions to Audit Logs
+  // Helper to log user actions to Audit Logs (Delegated strictly to Backend Admin SDK)
   const addAuditLog = async (log: Omit<AuditLog, 'id' | 'timestamp'>) => {
     const newId = `log_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-    const newLog: AuditLog = {
+    const newLog: AuditLog = cleanUndefined({
       ...log,
       id: newId,
       timestamp: new Date().toISOString(),
@@ -250,16 +252,31 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       userName: log.userName || currentUser?.fullName || 'Hệ thống',
       userEmail: log.userEmail || currentUser?.email || 'system@truongphatreal.vn',
       userRole: log.userRole || currentUser?.role || 'ADMIN',
-      teamId: log.teamId || currentUser?.teamId,
-    };
+      teamId: log.teamId || currentUser?.teamId || null,
+    });
 
+    // Update local state for immediate screen feedback
     setAuditLogs((prev) => [newLog, ...prev.slice(0, 499)]);
-    if (isFirebaseConfigured) {
-      try {
-        await setDoc(doc(db, 'auditLogs', newId), newLog);
-      } catch (err: any) {
-        console.warn('Audit log write error:', err.message);
-      }
+
+    // Write via Backend Admin SDK (Client write to auditLogs is forbidden by Firestore rules)
+    try {
+      await sendAuditLogToBackend({
+        action: newLog.action,
+        module: newLog.module,
+        description: newLog.description,
+        details: newLog.details,
+        recordId: newLog.recordId,
+        recordCode: newLog.recordCode,
+        recordName: newLog.recordName,
+        teamId: newLog.teamId || null,
+        userId: newLog.userId,
+        userName: newLog.userName,
+        userEmail: newLog.userEmail,
+        userRole: newLog.userRole,
+        level: newLog.level,
+      });
+    } catch (err: any) {
+      console.warn('[AuditLog Service] Backend recording notice:', err.message);
     }
   };
 
@@ -709,15 +726,18 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       isDeleted: false,
     };
 
+    const sanitizedProp = cleanUndefined(newProp);
+
     if (isFirebaseConfigured) {
       try {
-        await setDoc(doc(db, 'properties', newId), newProp);
+        await setDoc(doc(db, 'properties', newId), sanitizedProp);
       } catch (err: any) {
         console.error('Save to Firestore error:', err);
+        throw new Error(`Lỗi lưu bất động sản: ${err.message || 'Không xác định'}`);
       }
     }
 
-    setProperties((prev) => [newProp, ...prev]);
+    setProperties((prev) => [sanitizedProp, ...prev]);
 
     await addAuditLog({
       action: 'CREATE',
@@ -1063,7 +1083,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     info('Đã xóa đội nhóm');
   };
 
-  // Customer Actions
+  // Customer Actions (Không optimistic UI, await xác nhận Firestore trước khi cập nhật state và thông báo)
   const addCustomer = async (customerData: Omit<Customer, 'id' | 'code' | 'createdAt' | 'updatedAt'>): Promise<Customer> => {
     const sequence = customers.length + 1;
     const newCode = `KH-AG${sequence.toString().padStart(4, '0')}`;
@@ -1073,29 +1093,36 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const assignedAgent = users.find((u) => u.id === customerData.assignedAgentId);
     const team = teams.find((t) => t.id === (customerData.teamId || assignedAgent?.teamId));
 
-    const newCustomer: Customer = {
+    const rawCustomer: Customer = {
       ...customerData,
       id: newId,
       code: newCode,
       assignedAgentName: assignedAgent?.fullName || 'Chưa phân công',
-      teamId: team?.id,
-      teamName: team?.name,
+      teamId: team?.id || null,
+      teamName: team?.name || null,
       createdAt: now,
       createdBy: currentUser?.id || 'anonymous',
       createdByName: currentUser?.fullName || 'Người dùng',
       updatedAt: now,
-      updatedBy: currentUser?.id,
+      updatedBy: currentUser?.id || null,
       isDeleted: false,
     };
 
-    setCustomers((prev) => [newCustomer, ...prev]);
+    // Deep sanitize to prevent "Unsupported field value: undefined"
+    const newCustomer = cleanUndefined(rawCustomer);
+
+    // Ghi vào Firestore TRƯỚC TIÊN - nếu lỗi, ném ra để giao diện giữ form và báo lỗi tiếng Việt
     if (isFirebaseConfigured) {
       try {
         await setDoc(doc(db, 'customers', newId), newCustomer);
-      } catch (err) {
-        console.error(err);
+      } catch (err: any) {
+        console.error('[Firestore addCustomer Error]', err);
+        throw new Error(`Không thể lưu khách hàng vào cơ sở dữ liệu: ${err.message || 'Lỗi kết nối'}`);
       }
     }
+
+    // Chỉ cập nhật state UI sau khi backend/Firestore đã xác nhận thành công
+    setCustomers((prev) => [newCustomer, ...prev]);
 
     await addAuditLog({
       action: 'CREATE',
@@ -1104,6 +1131,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       recordCode: newCode,
       recordName: newCustomer.fullName,
       description: `Tiếp nhận khách hàng mới [${newCode}] ${newCustomer.fullName}`,
+      teamId: newCustomer.teamId,
       level: 'INFO',
     });
 
@@ -1113,14 +1141,22 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const updateCustomer = async (id: string, data: Partial<Customer>): Promise<void> => {
     const now = new Date().toISOString();
-    setCustomers((prev) => prev.map((c) => (c.id === id ? { ...c, ...data, updatedAt: now, updatedBy: currentUser?.id } : c)));
+    const cleanData = cleanUndefined({
+      ...data,
+      updatedAt: now,
+      updatedBy: currentUser?.id || null,
+    });
+
     if (isFirebaseConfigured) {
       try {
-        await updateDoc(doc(db, 'customers', id), { ...data, updatedAt: now, updatedBy: currentUser?.id });
-      } catch (err) {
-        console.error(err);
+        await updateDoc(doc(db, 'customers', id), cleanData);
+      } catch (err: any) {
+        console.error('[Firestore updateCustomer Error]', err);
+        throw new Error(`Không thể cập nhật khách hàng: ${err.message || 'Lỗi kết nối'}`);
       }
     }
+
+    setCustomers((prev) => prev.map((c) => (c.id === id ? { ...c, ...cleanData } : c)));
     success('Cập nhật khách hàng thành công');
   };
 

@@ -734,7 +734,7 @@ export const PropertyForm: React.FC = () => {
             <label className="block text-xs font-semibold text-slate-700 mb-1">Tiêu đề tin đăng *</label>
             <input
               type="text"
-              placeholder="VD: Bán nhà phố mặt tiền Nguyễn Văn Cừ, P. Cầu Kho, Quận 1 (4.5x18m, 4 lầu đẹp)"
+              placeholder="VD: Bán nhà phố mặt tiền Trần Hưng Đạo, Phường Mỹ Bình, TP. Long Xuyên (5x20m, 3 tầng)"
               value={formData.title}
               onChange={(e) => setFormData({ ...formData, title: e.target.value })}
               className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-amber-500"

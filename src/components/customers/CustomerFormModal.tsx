@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
 import { Customer, PropertyCategory } from '../../types';
 import { formatVND } from '../../utils/formatters';
+import { cleanUndefined } from '../../utils/firestoreSanitizer';
 import {
   X,
   User,
@@ -41,18 +43,19 @@ const PROPERTY_CATEGORY_OPTIONS: PropertyCategory[] = [
 ];
 
 const POPULAR_AREAS = [
-  'Quận 1',
-  'Quận 2',
-  'Quận 3',
-  'Quận 7',
-  'Bình Thạnh',
-  'Phú Nhuận',
-  'TP. Thủ Đức',
-  'Tân Bình',
-  'Quận 10',
-  'Quận 4',
-  'Nhà Bè',
-  'Bình Dương',
+  'TP. Long Xuyên',
+  'TP. Châu Đốc',
+  'TX. Tân Châu',
+  'TX. Tịnh Biên',
+  'Huyện Thoại Sơn',
+  'Huyện Chợ Mới',
+  'Huyện Châu Thành',
+  'Huyện Châu Phú',
+  'Huyện Tri Tôn',
+  'Huyện Phú Tân',
+  'Huyện An Phú',
+  'Phường Rạch Giá, tỉnh An Giang',
+  'Huyện An Minh',
 ];
 
 const SOURCES = [
@@ -75,6 +78,7 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
 }) => {
   const { users, teams, addCustomer, updateCustomer, checkDuplicateCustomerPhone, locations } = useData();
   const { currentUser, isAdmin, isTeamLeader } = useAuth();
+  const { error: toastError } = useToast();
 
   const isEdit = !!customer;
 
@@ -109,6 +113,7 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
   // Validation & Duplicate check
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Initialize or reset form
@@ -226,7 +231,7 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
     }
   };
 
-  const validate逃 = () => {
+  const validate = () => {
     const errs: { [key: string]: string } = {};
     if (!fullName.trim()) errs.fullName = 'Vui lòng nhập họ tên khách hàng';
     if (!phone.trim()) {
@@ -250,10 +255,10 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
-  const validate = validate逃;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitError(null);
     if (!validate()) return;
 
     setIsSubmitting(true);
@@ -261,32 +266,34 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
       const selectedAgent = users.find((u) => u.id === assignedAgentId) || users[0];
       const selectedTeam = teams.find((t) => t.id === selectedAgent?.teamId);
 
-      const payload = {
+      const rawPayload = {
         fullName: fullName.trim(),
         phone: phone.trim(),
-        secondaryPhone: secondaryPhone.trim() || undefined,
-        email: email.trim() || undefined,
-        zalo: zalo.trim() || undefined,
-        address: address.trim() || undefined,
+        secondaryPhone: secondaryPhone.trim() || null,
+        email: email.trim() || null,
+        zalo: zalo.trim() || null,
+        address: address.trim() || null,
         source,
         demandType,
         propertyTypes,
-        areas: areas.length > 0 ? areas : ['Toàn thành phố'],
+        areas: areas.length > 0 ? areas : ['Toàn tỉnh An Giang'],
         minPrice: minPrice ? Number(minPrice) : 0,
         maxPrice: maxPrice ? Number(maxPrice) : 0,
-        minArea: minArea ? Number(minArea) : undefined,
-        maxArea: maxArea ? Number(maxArea) : undefined,
+        minArea: minArea ? Number(minArea) : null,
+        maxArea: maxArea ? Number(maxArea) : null,
         potentialLevel,
         status,
         assignedAgentId: selectedAgent?.id || 'admin',
         assignedAgentName: selectedAgent?.fullName || 'Hệ thống',
-        assignedAgentPhone: selectedAgent?.phone,
-        teamId: selectedTeam?.id,
-        teamName: selectedTeam?.name,
-        notes: notes.trim() || undefined,
-        nextAppointmentDate: nextAppointmentDate ? new Date(nextAppointmentDate).toISOString() : undefined,
-        nextAppointmentNote: nextAppointmentNote.trim() || undefined,
+        assignedAgentPhone: selectedAgent?.phone || null,
+        teamId: selectedTeam?.id || null,
+        teamName: selectedTeam?.name || null,
+        notes: notes.trim() || null,
+        nextAppointmentDate: nextAppointmentDate ? new Date(nextAppointmentDate).toISOString() : null,
+        nextAppointmentNote: nextAppointmentNote.trim() || null,
       };
+
+      const payload = cleanUndefined(rawPayload);
 
       if (isEdit && customer) {
         await updateCustomer(customer.id, payload);
@@ -296,8 +303,11 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
         if (onSaved) onSaved(created);
       }
       onClose();
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error('[CustomerForm Submit Error]', err);
+      const errMsg = err?.message || 'Có lỗi xảy ra khi lưu khách hàng. Vui lòng kiểm tra lại.';
+      setSubmitError(errMsg);
+      toastError('Lưu khách hàng thất bại', errMsg);
     } finally {
       setIsSubmitting(false);
     }
@@ -337,6 +347,17 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
 
         {/* Modal Body */}
         <form onSubmit={handleSubmit} className="overflow-y-auto p-6 space-y-6 flex-1">
+          {/* Submit Error alert */}
+          {submitError && (
+            <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-3 text-rose-900 animate-in fade-in duration-200">
+              <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+              <div className="text-xs space-y-1">
+                <div className="font-bold text-rose-800">KHÔNG THỂ LƯU THÔNG TIN KHÁCH HÀNG</div>
+                <div className="text-rose-700">{submitError}</div>
+              </div>
+            </div>
+          )}
+
           {/* Duplicate warning notification */}
           {duplicateWarning && (
             <div className="p-4 bg-amber-50 border border-amber-300 rounded-xl flex items-start gap-3 text-amber-900 animate-in shake duration-200">
@@ -453,7 +474,7 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
                   type="text"
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
-                  placeholder="VD: An Phú, TP. Thủ Đức"
+                  placeholder="VD: Phường Rạch Giá, tỉnh An Giang"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:border-slate-900 ring-slate-200"
                 />
               </div>
@@ -728,7 +749,7 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
                   type="text"
                   value={nextAppointmentNote}
                   onChange={(e) => setNextAppointmentNote(e.target.value)}
-                  placeholder="VD: Dẫn khách xem căn Thảo Điền BDS-000001 lúc 9h30 sáng"
+                  placeholder="VD: Dẫn khách xem BĐS tại An Minh lúc 9h30 sáng"
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:border-slate-900 ring-slate-200"
                 />
               </div>

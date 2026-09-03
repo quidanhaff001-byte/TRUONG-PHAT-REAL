@@ -18,7 +18,9 @@ export async function parseResponseSafe<T = any>(response: Response, endpoint?: 
   if (!response.ok) {
     let message = `Yêu cầu thất bại (${response.status})`;
 
-    if (raw && contentType.includes('application/json')) {
+    if (response.status === 405) {
+      message = 'Máy chủ phản hồi lỗi 405 (Method Not Allowed). Backend API chưa hỗ trợ phương thức này.';
+    } else if (raw && contentType.includes('application/json')) {
       try {
         const errorData = JSON.parse(raw);
         message = errorData.message || errorData.error || message;
