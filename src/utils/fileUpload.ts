@@ -164,8 +164,16 @@ export async function uploadPropertyImageToStorage(
     });
 
     if (res.ok) {
-      const data = await res.json();
-      if (data.success && data.url) {
+      let data: any = null;
+      try {
+        const text = await res.text();
+        if (text && text.trim()) {
+          data = JSON.parse(text);
+        }
+      } catch (parseErr) {
+        console.warn('Lỗi đọc phản hồi upload:', parseErr);
+      }
+      if (data && data.success && data.url) {
         if (options.onProgress) options.onProgress(100);
         return {
           id: `${propertyId}_img_${timestamp}_${Math.random().toString(36).substring(2, 6)}`,

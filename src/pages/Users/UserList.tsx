@@ -32,6 +32,9 @@ import {
   Eye,
   EyeOff,
   Camera,
+  ExternalLink,
+  AlertCircle,
+  Terminal,
 } from 'lucide-react';
 import { User, Team, UserRole } from '../../types';
 import { RoleBadge } from '../../components/common/Badge';
@@ -74,6 +77,9 @@ export const UserList: React.FC = () => {
   // User Create / Edit Modal State
   const [showUserModal, setShowUserModal] = useState<boolean>(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [creationMode, setCreationMode] = useState<'AUTO' | 'FIREBASE_CONSOLE_UID'>('AUTO');
+  const [providedUid, setProvidedUid] = useState<string>('');
+  const [backendNotice, setBackendNotice] = useState<{ code?: string; message: string; hint?: string } | null>(null);
   const [userFormData, setUserFormData] = useState<{
     fullName: string;
     email: string;
@@ -93,7 +99,7 @@ export const UserList: React.FC = () => {
     teamId: '',
     notes: '',
     tempPassword: '',
-    sendResetEmailAfterCreation: true,
+    sendResetEmailAfterCreation: false,
   });
 
   // Created Account Result Modal (confirms account creation securely)
@@ -185,6 +191,9 @@ export const UserList: React.FC = () => {
 
   // 1. Create or Update User Handler
   const handleOpenUserModal = (u?: User) => {
+    setBackendNotice(null);
+    setCreationMode('AUTO');
+    setProvidedUid('');
     if (u) {
       setEditingUser(u);
       setUserFormData({
@@ -209,7 +218,7 @@ export const UserList: React.FC = () => {
         teamId: teams[0]?.id || '',
         notes: '',
         tempPassword: '',
-        sendResetEmailAfterCreation: true,
+        sendResetEmailAfterCreation: false,
       });
     }
     setShowUserModal(true);
@@ -218,9 +227,42 @@ export const UserList: React.FC = () => {
   const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!userFormData.fullName.trim() || !userFormData.email.trim() || !userFormData.phone.trim()) {
-      error('Thiếu thông tin', 'Vui lòng điền đầy đủ Họ tên, Email và Số điện thoại');
+    if (!userFormData.fullName.trim() || !userFormData.email.trim() || !userFormData.phone.trim() || !userFormData.employeeCode.trim()) {
+      error('Thiếu thông tin', 'Vui lòng điền đầy đủ Họ tên, Mã nhân viên, Email và Số điện thoại.');
       return;
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(userFormData.email.trim())) {
+      error('Email không hợp lệ', 'Địa chỉ email không hợp lệ. Vui lòng kiểm tra lại định dạng email.');
+      return;
+    }
+
+    // If manual Firebase Console UID mode
+    if (!editingUser && creationMode === 'FIREBASE_CONSOLE_UID') {
+      if (!providedUid.trim()) {
+        error('Thiếu User UID', 'Vui lòng nhập User UID lấy từ Firebase Authentication Console.');
+        return;
+      }
+    }
+
+    // If auto mode and password is typed, check complexity on client
+    if (!editingUser && creationMode === 'AUTO' && userFormData.tempPassword.trim()) {
+      const pwd = userFormData.tempPassword.trim();
+      if (
+        pwd.length < 8 ||
+        !/[A-Z]/.test(pwd) ||
+        !/[a-z]/.test(pwd) ||
+        !/[0-9]/.test(pwd) ||
+        !/[!@#$%^&*(),.?":{}|<>]/.test(pwd)
+      ) {
+        error(
+          'Mật khẩu không đủ mạnh',
+          'Mật khẩu phải có tối thiểu 8 ký tự, bao gồm chữ hoa, chữ thường, chữ số và ký tự đặc biệt.'
+        );
+        return;
+      }
     }
 
     try {
@@ -243,8 +285,12 @@ export const UserList: React.FC = () => {
         success('Cập nhật thành công', `Hồ sơ nhân sự ${userFormData.fullName} đã được lưu.`);
         setShowUserModal(false);
       } else {
-        // Create user via Admin SDK API (creates Firebase Auth + Firestore doc + Custom Claims)
-        setProcessingMsg('Đang khởi tạo tài khoản Firebase Authentication và phân quyền...');
+        // Create user via Admin API
+        setProcessingMsg(
+          creationMode === 'FIREBASE_CONSOLE_UID'
+            ? 'Đang tạo hồ sơ nhân sự liên kết Firebase UID...'
+            : 'Đang khởi tạo tài khoản Firebase Authentication và phân quyền...'
+        );
         const selectedTeam = teams.find((t) => t.id === userFormData.teamId);
 
         const result = await adminCreateUserApi({
@@ -256,11 +302,12 @@ export const UserList: React.FC = () => {
           teamId: userFormData.teamId || undefined,
           teamName: selectedTeam ? selectedTeam.name : '',
           notes: userFormData.notes,
-          tempPassword: userFormData.tempPassword.trim(),
+          tempPassword: userFormData.tempPassword.trim() || undefined,
           sendEmailInvite: userFormData.sendResetEmailAfterCreation,
+          providedUid: creationMode === 'FIREBASE_CONSOLE_UID' ? providedUid.trim() : undefined,
         });
 
-        // If requested to send password reset email immediately
+        // If requested to send password reset email immediately and option was checked
         if (userFormData.sendResetEmailAfterCreation && result.user) {
           try {
             await adminSendPasswordResetApi(result.user.id, result.user.email);
@@ -284,7 +331,24 @@ export const UserList: React.FC = () => {
       }
     } catch (err: any) {
       console.error('Error saving user:', err);
-      error('Thao tác thất bại', err.message || 'Không thể lưu thông tin nhân viên.');
+      const isNotConfigured =
+        err.code === 'BACKEND_NOT_CONFIGURED' ||
+        err.message?.includes('Chưa cấu hình') ||
+        err.status === 503;
+
+      if (isNotConfigured) {
+        setBackendNotice({
+          code: 'BACKEND_NOT_CONFIGURED',
+          message: 'Chưa cấu hình dịch vụ tạo tài khoản.',
+          hint:
+            err.hint ||
+            'Dịch vụ Firebase Admin SDK phía máy chủ cần Service Account Key để gọi API trực tiếp. Tạm thời Quản trị viên hãy tạo user trong Firebase Console, sau đó dán User UID vào đây để hoàn tất tạo hồ sơ.',
+        });
+        setCreationMode('FIREBASE_CONSOLE_UID');
+        error('Chưa cấu hình dịch vụ tạo tài khoản', 'Dịch vụ tạo tự động chưa sẵn sàng. Vui lòng xem hướng dẫn tạo qua Firebase Console bên dưới.');
+      } else {
+        error('Thao tác thất bại', err.message || 'Không thể lưu thông tin nhân viên.');
+      }
     } finally {
       setIsProcessing(false);
       setProcessingMsg('');
@@ -1053,7 +1117,82 @@ export const UserList: React.FC = () => {
               </button>
             </div>
 
+            {/* Backend notice if service is unconfigured */}
+            {!editingUser && backendNotice && (
+              <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-2xl text-amber-900 space-y-2">
+                <div className="flex items-center gap-2 font-bold text-amber-800 text-xs">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>{backendNotice.message || 'Chưa cấu hình dịch vụ tạo tài khoản.'}</span>
+                </div>
+                <p className="text-[11px] text-amber-800/90 leading-relaxed">
+                  {backendNotice.hint ||
+                    'Tạm thời Quản trị viên có thể tạo user trong Firebase Console (Authentication > Users > Add user), sau đó dán User UID vào tab bên dưới để thêm hồ sơ users/{uid}.'}
+                </p>
+                <div className="pt-1">
+                  <a
+                    href="https://console.firebase.google.com"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-[#001f3f] hover:underline"
+                  >
+                    <span>Mở Firebase Console</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              </div>
+            )}
+
+            {/* Mode Selector for New Users */}
+            {!editingUser && (
+              <div className="mb-4 flex items-center p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setCreationMode('AUTO')}
+                  className={`flex-1 py-1.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    creationMode === 'AUTO'
+                      ? 'bg-white text-[#001f3f] shadow-xs font-bold'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                  <span>Tự động qua Backend</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCreationMode('FIREBASE_CONSOLE_UID')}
+                  className={`flex-1 py-1.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    creationMode === 'FIREBASE_CONSOLE_UID'
+                      ? 'bg-white text-[#001f3f] shadow-xs font-bold'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Terminal className="w-4 h-4 text-amber-600" />
+                  <span>Nhập UID Firebase Console</span>
+                </button>
+              </div>
+            )}
+
             <form onSubmit={handleSaveUser} className="space-y-4 text-xs">
+              {/* If manual UID input mode */}
+              {!editingUser && creationMode === 'FIREBASE_CONSOLE_UID' && (
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
+                  <label className="block font-bold text-slate-800 text-xs">
+                    User UID từ Firebase Authentication *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Dán User UID từ Firebase Console (VD: 4nC7vK2x9ZpL0...)"
+                    value={providedUid}
+                    onChange={(e) => setProvidedUid(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-mono text-slate-900 focus:outline-none focus:border-[#D4AF37]"
+                  />
+                  <p className="text-[10px] text-slate-500">
+                    Tạo user tại <strong>Firebase Console &gt; Authentication &gt; Users &gt; Add user</strong>, sao chép User UID và dán vào đây để hệ thống liên kết hồ sơ Firestore và phân quyền.
+                  </p>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* Full Name */}
                 <div>
@@ -1145,8 +1284,8 @@ export const UserList: React.FC = () => {
                 </div>
               </div>
 
-              {/* Password configuration for new users */}
-              {!editingUser && (
+              {/* Password configuration for new users in AUTO mode */}
+              {!editingUser && creationMode === 'AUTO' && (
                 <div className="p-4 bg-amber-50/60 rounded-2xl border border-amber-200/80 space-y-3">
                   <div className="flex items-center gap-2 font-bold text-[#001f3f]">
                     <KeyRound className="w-4 h-4 text-amber-600" />
@@ -1155,18 +1294,18 @@ export const UserList: React.FC = () => {
 
                   <div>
                     <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                      Mật khẩu khởi tạo (Input bảo mật type="password"):
+                      Mật khẩu khởi tạo:
                     </label>
                     <input
                       type="password"
                       autoComplete="new-password"
                       value={userFormData.tempPassword}
                       onChange={(e) => setUserFormData({ ...userFormData, tempPassword: e.target.value })}
-                      placeholder="Nhập mật khẩu (tối thiểu 8 ký tự, có chữ hoa, thường, số, ký tự đặc biệt)"
+                      placeholder="Tối thiểu 8 ký tự, gồm chữ hoa, chữ thường, số và ký tự đặc biệt"
                       className="w-full px-3 py-2 bg-white border border-amber-300 rounded-xl text-xs font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-400"
                     />
                     <p className="text-[10px] text-slate-500 mt-1">
-                      Mật khẩu được mã hóa an toàn, không hiển thị dưới dạng văn bản và không lưu trên Firestore.
+                      Mật khẩu được mã hóa trực tiếp qua Firebase Admin SDK, không lưu trữ dưới dạng thô trên Firestore hay log.
                     </p>
                   </div>
 
@@ -1183,7 +1322,7 @@ export const UserList: React.FC = () => {
                       className="rounded text-[#001f3f] focus:ring-[#D4AF37]"
                     />
                     <span className="text-[11px] text-slate-700 font-medium">
-                      Gửi email thông báo kích hoạt & thiết lập mật khẩu tới nhân viên
+                      Gửi email thông báo kích hoạt tới nhân viên (yêu cầu dịch vụ SMTP/Email)
                     </span>
                   </label>
                 </div>
@@ -1220,7 +1359,13 @@ export const UserList: React.FC = () => {
                       <span>{processingMsg || 'Đang xử lý...'}</span>
                     </>
                   ) : (
-                    <span>{editingUser ? 'Lưu thay đổi' : 'Tạo tài khoản ngay'}</span>
+                    <span>
+                      {editingUser
+                        ? 'Lưu thay đổi'
+                        : creationMode === 'FIREBASE_CONSOLE_UID'
+                        ? 'Thêm hồ sơ nhân sự'
+                        : 'Tạo tài khoản ngay'}
+                    </span>
                   )}
                 </button>
               </div>

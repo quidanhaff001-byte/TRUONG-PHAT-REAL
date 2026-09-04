@@ -26,6 +26,7 @@ export interface CreateUserInput {
   notes?: string;
   tempPassword?: string;
   sendEmailInvite?: boolean;
+  providedUid?: string;
 }
 
 export interface UpdateUserInput {
@@ -39,22 +40,30 @@ export interface UpdateUserInput {
   avatarUrl?: string;
 }
 
-export async function adminCreateUserApi(data: CreateUserInput): Promise<{ success: boolean; message: string; user?: User; temporaryPasswordGenerated?: string }> {
+export async function adminCreateUserApi(data: CreateUserInput): Promise<{ success: boolean; message: string; user?: User; code?: string; hint?: string }> {
   const endpoint = '/api/admin/create-user';
   try {
     const headers = await getAuthHeader();
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...headers,
-      },
-      body: JSON.stringify(data),
-    });
+    let res: Response;
+    try {
+      res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers,
+        },
+        body: JSON.stringify(data),
+      });
+    } catch (networkErr: any) {
+      throw new Error('Mất kết nối hoặc không thể kết nối đến máy chủ. Vui lòng kiểm tra lại kết nối mạng.');
+    }
 
-    const resData = await parseResponseSafe<{ success: boolean; message: string; user?: User; error?: string }>(res, endpoint);
+    const resData = await parseResponseSafe<{ success: boolean; message: string; user?: User; error?: string; code?: string; hint?: string }>(res, endpoint);
     if (!resData || !resData.success) {
-      throw new Error(resData?.error || resData?.message || 'Không thể tạo nhân viên mới.');
+      const err: any = new Error(resData?.error || resData?.message || 'Không thể tạo nhân viên mới.');
+      err.code = resData?.code;
+      err.hint = resData?.hint;
+      throw err;
     }
     return resData;
   } catch (err: any) {

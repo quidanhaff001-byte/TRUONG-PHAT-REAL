@@ -78,6 +78,37 @@ try {
 }
 
 // 2. Audit Log Helper
+function sanitizeFirestoreData<T extends Record<string, any>>(obj: T): T {
+  const clean: Record<string, any> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) {
+      if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+        clean[key] = sanitizeFirestoreData(value);
+      } else {
+        clean[key] = value;
+      }
+    } else {
+      clean[key] = null;
+    }
+  }
+  return clean as T;
+}
+
+function sanitizeForLog(data: any) {
+  if (!data || typeof data !== 'object') return data;
+  const clone = { ...data };
+  // Never log passwords, tokens or secrets
+  delete clone.password;
+  delete clone.tempPassword;
+  delete clone.currentPassword;
+  delete clone.newPassword;
+  delete clone.token;
+  delete clone.idToken;
+  delete clone.secret;
+  return clone;
+}
+
+// Helper ghi Audit Log bảo mật phía Backend
 async function recordAuditLog(
   actor: { uid: string; email?: string; name?: string; role?: string },
   action: string,
@@ -94,10 +125,10 @@ async function recordAuditLog(
   if (!adminDb) return;
   try {
     const logId = `log_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-    const logDoc = {
+    const logDoc = sanitizeFirestoreData({
       id: logId,
       timestamp: new Date().toISOString(),
-      userId: actor.uid,
+      userId: actor.uid || 'anonymous',
       userName: actor.name || actor.email || 'Admin',
       userEmail: actor.email || '',
       userRole: actor.role || 'ADMIN',
@@ -115,22 +146,11 @@ async function recordAuditLog(
       status,
       errorMessage: errorMessage || '',
       level: status === 'FAILURE' ? 'WARNING' : 'INFO',
-    };
+    });
     await adminDb.collection('auditLogs').doc(logId).set(logDoc);
   } catch (err: any) {
     console.error('[AuditLog] Error recording log:', err.message);
   }
-}
-
-function sanitizeForLog(data: any) {
-  if (!data || typeof data !== 'object') return data;
-  const clone = { ...data };
-  // Never log passwords or secrets
-  delete clone.password;
-  delete clone.tempPassword;
-  delete clone.currentPassword;
-  delete clone.newPassword;
-  return clone;
 }
 
 // Endpoint ghi Audit Log qua Backend Admin SDK (bảo mật, không ghi undefined)
@@ -239,19 +259,19 @@ app.post('/api/upload-image', (req: Request, res: Response): void => {
 });
 function validatePasswordComplexity(password: string): { valid: boolean; reason?: string } {
   if (!password || password.length < 8) {
-    return { valid: false, reason: 'Mật khẩu phải có tối thiểu 8 ký tự' };
+    return { valid: false, reason: 'Mật khẩu không đủ mạnh. Mật khẩu phải có tối thiểu 8 ký tự, bao gồm chữ hoa, chữ thường, chữ số và ký tự đặc biệt.' };
   }
   if (!/[A-Z]/.test(password)) {
-    return { valid: false, reason: 'Mật khẩu phải chứa ít nhất 1 chữ in hoa (A-Z)' };
+    return { valid: false, reason: 'Mật khẩu không đủ mạnh. Mật khẩu phải có tối thiểu 8 ký tự, bao gồm chữ hoa, chữ thường, chữ số và ký tự đặc biệt.' };
   }
   if (!/[a-z]/.test(password)) {
-    return { valid: false, reason: 'Mật khẩu phải chứa ít nhất 1 chữ thường (a-z)' };
+    return { valid: false, reason: 'Mật khẩu không đủ mạnh. Mật khẩu phải có tối thiểu 8 ký tự, bao gồm chữ hoa, chữ thường, chữ số và ký tự đặc biệt.' };
   }
   if (!/[0-9]/.test(password)) {
-    return { valid: false, reason: 'Mật khẩu phải chứa ít nhất 1 chữ số (0-9)' };
+    return { valid: false, reason: 'Mật khẩu không đủ mạnh. Mật khẩu phải có tối thiểu 8 ký tự, bao gồm chữ hoa, chữ thường, chữ số và ký tự đặc biệt.' };
   }
   if (!/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
-    return { valid: false, reason: 'Mật khẩu phải chứa ít nhất 1 ký tự đặc biệt (!@#$%^&*...)' };
+    return { valid: false, reason: 'Mật khẩu không đủ mạnh. Mật khẩu phải có tối thiểu 8 ký tự, bao gồm chữ hoa, chữ thường, chữ số và ký tự đặc biệt.' };
   }
   return { valid: true };
 }
@@ -271,6 +291,7 @@ async function requireAdminAuth(req: AuthenticatedRequest, res: Response, next: 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     res.status(401).json({
       success: false,
+      code: 'UNAUTHORIZED',
       error: 'Yêu cầu không hợp lệ. Vui lòng đăng nhập lại với quyền Quản trị viên.',
     });
     return;
@@ -280,15 +301,18 @@ async function requireAdminAuth(req: AuthenticatedRequest, res: Response, next: 
   if (!idToken) {
     res.status(401).json({
       success: false,
+      code: 'UNAUTHORIZED',
       error: 'Token xác thực không hợp lệ hoặc đã hết hạn.',
     });
     return;
   }
 
   if (!adminAuth || !adminDb) {
-    res.status(500).json({
+    res.status(503).json({
       success: false,
-      error: 'Dịch vụ xác thực Quản trị viên phía máy chủ chưa sẵn sàng. Vui lòng thử lại sau.',
+      code: 'BACKEND_NOT_CONFIGURED',
+      error: 'Chưa cấu hình dịch vụ tạo tài khoản.',
+      hint: 'Dịch vụ Firebase Admin SDK phía máy chủ chưa sẵn sàng.',
     });
     return;
   }
@@ -322,7 +346,8 @@ async function requireAdminAuth(req: AuthenticatedRequest, res: Response, next: 
     if (role !== 'ADMIN') {
       res.status(403).json({
         success: false,
-        error: 'Quyền truy cập bị từ chối. Chỉ Quản trị viên (ADMIN) mới được thực hiện thao tác này.',
+        code: 'PERMISSION_DENIED',
+        error: 'Quyền truy cập bị từ chối. Chỉ Quản trị viên (ADMIN) mới có quyền tạo tài khoản nhân viên.',
       });
       return;
     }
@@ -339,6 +364,7 @@ async function requireAdminAuth(req: AuthenticatedRequest, res: Response, next: 
     console.error('[Auth Error] verifyIdToken failed:', err.message);
     res.status(401).json({
       success: false,
+      code: 'UNAUTHORIZED',
       error: 'Phiên đăng nhập đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại.',
     });
   }
@@ -372,14 +398,26 @@ async function isLastAdmin(targetUid: string): Promise<boolean> {
 
 // 1. adminCreateUser
 app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-  const { employeeCode, fullName, email, phone, role, teamId, teamName, notes, tempPassword, sendEmailInvite } = req.body;
+  const { employeeCode, fullName, email, phone, role, teamId, teamName, notes, tempPassword, sendEmailInvite, providedUid } = req.body;
   const ip = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '';
   const userAgent = req.headers['user-agent'] || '';
 
   if (!email || !fullName || !employeeCode || !phone) {
     res.status(400).json({
       success: false,
+      code: 'MISSING_FIELDS',
       error: 'Vui lòng điền đầy đủ các thông tin bắt buộc: Họ tên, Email, SĐT, Mã nhân viên.',
+    });
+    return;
+  }
+
+  // Validate email format
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email.trim())) {
+    res.status(400).json({
+      success: false,
+      code: 'INVALID_EMAIL',
+      error: 'Địa chỉ email không hợp lệ. Vui lòng kiểm tra lại định dạng email.',
     });
     return;
   }
@@ -387,36 +425,167 @@ app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRe
   const validRoles = ['ADMIN', 'TEAM_LEADER', 'AGENT'];
   const userRole = validRoles.includes(role) ? role : 'AGENT';
 
-  if (!adminAuth || !adminDb) {
-    res.status(500).json({ success: false, error: 'Dịch vụ Firebase Admin chưa sẵn sàng.' });
+  if (!adminDb) {
+    res.status(503).json({
+      success: false,
+      code: 'BACKEND_NOT_CONFIGURED',
+      error: 'Chưa cấu hình dịch vụ tạo tài khoản.',
+      hint: 'Dịch vụ Firestore phía máy chủ chưa sẵn sàng.',
+    });
+    return;
+  }
+
+  // Check if email already exists in Firestore users collection
+  try {
+    const duplicateInDb = await adminDb.collection('users').where('email', '==', email.trim().toLowerCase()).get();
+    if (!duplicateInDb.empty) {
+      res.status(400).json({
+        success: false,
+        code: 'EMAIL_EXISTS',
+        error: 'Email này đã được sử dụng cho một tài khoản khác trong hệ thống.',
+      });
+      return;
+    }
+  } catch (checkErr: any) {
+    console.warn('Error checking existing user in Firestore:', checkErr.message);
+  }
+
+  // CASE A: User UID provided directly from Firebase Console (Spark plan / Manual Fallback)
+  if (providedUid && typeof providedUid === 'string' && providedUid.trim()) {
+    const targetUid = providedUid.trim();
+    try {
+      const existingDoc = await adminDb.collection('users').doc(targetUid).get();
+      if (existingDoc.exists) {
+        res.status(400).json({
+          success: false,
+          error: 'Hồ sơ nhân sự cho UID này đã tồn tại trong hệ thống.',
+        });
+        return;
+      }
+
+      // Try setting custom claims if adminAuth is available
+      if (adminAuth) {
+        try {
+          await adminAuth.setCustomUserClaims(targetUid, {
+            role: userRole,
+            teamId: teamId || null,
+            admin: userRole === 'ADMIN',
+          });
+        } catch (claimErr: any) {
+          console.warn('[providedUid] Warning setting custom claims:', claimErr.message);
+        }
+      }
+
+      const now = new Date().toISOString();
+      const newUserDoc = sanitizeFirestoreData({
+        id: targetUid,
+        uid: targetUid,
+        employeeCode: employeeCode.trim().toUpperCase(),
+        fullName: fullName.trim(),
+        email: email.trim().toLowerCase(),
+        phone: phone.trim(),
+        avatarUrl: '',
+        role: userRole,
+        teamId: teamId || null,
+        teamName: teamName || '',
+        status: 'ACTIVE',
+        mustChangePassword: false,
+        createdAt: now,
+        createdBy: req.adminUser?.uid || null,
+        updatedAt: now,
+        updatedBy: req.adminUser?.uid || null,
+        notes: notes || '',
+        startDate: now.split('T')[0],
+        propertiesCount: 0,
+        customersCount: 0,
+        dealsCount: 0,
+      });
+
+      await adminDb.collection('users').doc(targetUid).set(newUserDoc);
+
+      if (teamId) {
+        try {
+          const teamRef = adminDb.collection('teams').doc(teamId);
+          const teamSnap = await teamRef.get();
+          if (teamSnap.exists) {
+            const currentMembers = teamSnap.data()?.memberIds || [];
+            if (!currentMembers.includes(targetUid)) {
+              await teamRef.update({
+                memberIds: [...currentMembers, targetUid],
+                updatedAt: now,
+              });
+            }
+          }
+        } catch (teamErr) {
+          console.warn('Could not update team memberIds:', teamErr);
+        }
+      }
+
+      // Record Audit Log: CREATE_USER
+      await recordAuditLog(
+        req.adminUser!,
+        'CREATE_USER',
+        'USERS',
+        `Tạo hồ sơ nhân viên qua Firebase Console UID: ${fullName} (${employeeCode}) với vai trò ${userRole}`,
+        { userId: targetUid, userName: fullName, recordId: targetUid },
+        null,
+        newUserDoc,
+        ip,
+        userAgent,
+        'SUCCESS'
+      );
+
+      res.json({
+        success: true,
+        message: 'Đã tạo hồ sơ nhân viên thành công liên kết với User UID từ Firebase Authentication.',
+        user: {
+          id: targetUid,
+          uid: targetUid,
+          employeeCode: newUserDoc.employeeCode,
+          fullName: newUserDoc.fullName,
+          email: newUserDoc.email,
+          phone: newUserDoc.phone,
+          role: newUserDoc.role,
+          teamId: newUserDoc.teamId,
+          status: newUserDoc.status,
+          mustChangePassword: false,
+        },
+      });
+      return;
+    } catch (manualErr: any) {
+      console.error('[providedUid] Error saving profile:', manualErr);
+      res.status(500).json({
+        success: false,
+        error: `Không thể tạo hồ sơ nhân viên: ${manualErr.message || 'Lỗi cơ sở dữ liệu'}`,
+      });
+      return;
+    }
+  }
+
+  // CASE B: Standard Automated Creation via Firebase Admin SDK
+  if (!adminAuth) {
+    res.status(503).json({
+      success: false,
+      code: 'BACKEND_NOT_CONFIGURED',
+      error: 'Chưa cấu hình dịch vụ tạo tài khoản.',
+      hint: 'Tạm thời Quản trị viên có thể tạo user trong Firebase Console (Authentication > Users > Add user), sau đó thêm hồ sơ users/{uid}.',
+    });
     return;
   }
 
   let createdAuthUser: UserRecord | null = null;
 
   try {
-    // Check if email already exists in Auth
-    let existingUser: UserRecord | null = null;
-    try {
-      existingUser = await adminAuth.getUserByEmail(email);
-    } catch (e: any) {
-      if (e.code !== 'auth/user-not-found') throw e;
-    }
-
-    if (existingUser) {
-      res.status(400).json({
-        success: false,
-        error: `Email ${email} đã được đăng ký trong hệ thống Authentication. Vui lòng dùng email khác hoặc cập nhật tài khoản hiện có.`,
-      });
-      return;
-    }
-
-    // Password validation if tempPassword is provided
+    // Password validation
     let initialPassword = tempPassword?.trim();
     if (initialPassword) {
       const check = validatePasswordComplexity(initialPassword);
       if (!check.valid) {
-        res.status(400).json({ success: false, error: check.reason });
+        res.status(400).json({
+          success: false,
+          code: 'WEAK_PASSWORD',
+          error: check.reason || 'Mật khẩu không đủ mạnh. Mật khẩu phải có tối thiểu 8 ký tự, bao gồm chữ hoa, chữ thường, chữ số và ký tự đặc biệt.',
+        });
         return;
       }
     } else {
@@ -424,13 +593,41 @@ app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRe
       initialPassword = `TP@${Math.floor(100000 + Math.random() * 900000)}#Aa`;
     }
 
+    // Check if email already exists in Firebase Auth
+    let existingUser: UserRecord | null = null;
+    try {
+      existingUser = await adminAuth.getUserByEmail(email.trim().toLowerCase());
+    } catch (e: any) {
+      if (e.code === 'auth/email-already-exists') {
+        res.status(400).json({
+          success: false,
+          code: 'EMAIL_EXISTS',
+          error: 'Email này đã được sử dụng cho một tài khoản khác trong hệ thống.',
+        });
+        return;
+      }
+      if (e.code !== 'auth/user-not-found') {
+        // If it's a backend config error (e.g. Identity Toolkit disabled or missing credentials)
+        throw e;
+      }
+    }
+
+    if (existingUser) {
+      res.status(400).json({
+        success: false,
+        code: 'EMAIL_EXISTS',
+        error: 'Email này đã được sử dụng cho một tài khoản khác trong hệ thống.',
+      });
+      return;
+    }
+
     // Create Firebase Auth user
     createdAuthUser = await adminAuth.createUser({
-      email,
+      email: email.trim().toLowerCase(),
       emailVerified: true,
       password: initialPassword,
-      displayName: fullName,
-      phoneNumber: phone.startsWith('+') ? phone : undefined,
+      displayName: fullName.trim(),
+      phoneNumber: phone.startsWith('+') ? phone.trim() : undefined,
       disabled: false,
     });
 
@@ -439,12 +636,13 @@ app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRe
     // Set Custom Claims for RBAC
     await adminAuth.setCustomUserClaims(uid, {
       role: userRole,
+      teamId: teamId || null,
       admin: userRole === 'ADMIN',
     });
 
-    // Create User Document in Cloud Firestore
+    // Create User Document in Cloud Firestore (Guaranteed no undefined values)
     const now = new Date().toISOString();
-    const newUserDoc = {
+    const newUserDoc = sanitizeFirestoreData({
       id: uid,
       uid,
       employeeCode: employeeCode.trim().toUpperCase(),
@@ -458,15 +656,15 @@ app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRe
       status: 'ACTIVE',
       mustChangePassword: true, // Force password change on first login
       createdAt: now,
-      createdBy: req.adminUser?.uid,
+      createdBy: req.adminUser?.uid || null,
       updatedAt: now,
-      updatedBy: req.adminUser?.uid,
+      updatedBy: req.adminUser?.uid || null,
       notes: notes || '',
       startDate: now.split('T')[0],
       propertiesCount: 0,
       customersCount: 0,
       dealsCount: 0,
-    };
+    });
 
     await adminDb.collection('users').doc(uid).set(newUserDoc);
 
@@ -489,10 +687,10 @@ app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRe
       }
     }
 
-    // Record Audit Log (strictly excluding passwords)
+    // Record Audit Log: CREATE_USER (strictly excluding passwords)
     await recordAuditLog(
       req.adminUser!,
-      'CREATE',
+      'CREATE_USER',
       'USERS',
       `Tạo tài khoản nhân viên mới: ${fullName} (${employeeCode}) với vai trò ${userRole}`,
       { userId: uid, userName: fullName, recordId: uid },
@@ -527,6 +725,7 @@ app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRe
     if (createdAuthUser) {
       try {
         await adminAuth.deleteUser(createdAuthUser.uid);
+        console.log(`[Rollback] Đã xóa Auth user mồ côi: ${createdAuthUser.uid}`);
       } catch (rollbackErr) {
         console.error('Rollback deleteUser failed:', rollbackErr);
       }
@@ -534,7 +733,7 @@ app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRe
 
     await recordAuditLog(
       req.adminUser!,
-      'CREATE',
+      'CREATE_USER',
       'USERS',
       `Thất bại khi tạo tài khoản nhân viên: ${fullName} (${email})`,
       { userName: fullName },
@@ -545,6 +744,54 @@ app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRe
       'FAILURE',
       err.message
     );
+
+    // Handle specific error codes in Vietnamese
+    if (err.code === 'auth/email-already-exists') {
+      res.status(400).json({
+        success: false,
+        code: 'EMAIL_EXISTS',
+        error: 'Email này đã được sử dụng cho một tài khoản khác trong hệ thống.',
+      });
+      return;
+    }
+
+    if (err.code === 'auth/invalid-email') {
+      res.status(400).json({
+        success: false,
+        code: 'INVALID_EMAIL',
+        error: 'Địa chỉ email không hợp lệ. Vui lòng kiểm tra lại định dạng email.',
+      });
+      return;
+    }
+
+    if (err.code === 'auth/weak-password') {
+      res.status(400).json({
+        success: false,
+        code: 'WEAK_PASSWORD',
+        error: 'Mật khẩu không đủ mạnh. Mật khẩu phải có tối thiểu 8 ký tự, bao gồm chữ hoa, chữ thường, chữ số và ký tự đặc biệt.',
+      });
+      return;
+    }
+
+    // Backend / Spark credential / Identity Toolkit not configured
+    const isBackendConfigError =
+      err.code === 'auth/internal-error' ||
+      err.code === 'auth/insufficient-permission' ||
+      err.message?.includes('identitytoolkit') ||
+      err.message?.includes('credential') ||
+      err.message?.includes('permission') ||
+      err.message?.includes('Default Credentials');
+
+    if (isBackendConfigError) {
+      res.status(503).json({
+        success: false,
+        code: 'BACKEND_NOT_CONFIGURED',
+        error: 'Chưa cấu hình dịch vụ tạo tài khoản.',
+        details: 'Dịch vụ Firebase Admin SDK cần Service Account Key hoặc Identity Toolkit API để tạo tài khoản tự động.',
+        hint: 'Tạm thời Quản trị viên có thể tạo user trong Firebase Console (Authentication > Users > Add user), sau đó thêm hồ sơ users/{uid}.',
+      });
+      return;
+    }
 
     res.status(500).json({
       success: false,
