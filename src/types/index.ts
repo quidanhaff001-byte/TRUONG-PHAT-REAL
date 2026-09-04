@@ -139,7 +139,7 @@ export interface PropertyImageItem {
 
 export interface LocationItem {
   id: string;
-  provinceCode: 'AN_GIANG_NEW';
+  provinceCode: 'AN_GIANG_NEW' | 'AN_GIANG';
   provinceName: 'An Giang';
   formerProvince: 'AN_GIANG_OLD' | 'KIEN_GIANG_OLD';
   administrativeType: 'WARD' | 'COMMUNE' | 'SPECIAL_ZONE' | 'CITY' | 'DISTRICT';
@@ -851,8 +851,18 @@ export interface AuditLog {
   teamId?: string;
   action:
     | 'CREATE'
+    | 'CREATE_PROPERTY'
+    | 'CREATE_CUSTOMER'
+    | 'CREATE_APPOINTMENT'
+    | 'CREATE_TRANSACTION'
+    | 'CREATE_COMMISSION'
+    | 'CREATE_RENTAL'
+    | 'CREATE_USER'
     | 'UPDATE'
+    | 'UPDATE_USER'
     | 'DELETE'
+    | 'DELETE_USER'
+    | 'DELETE_ORPHAN_COMMISSION'
     | 'RESTORE'
     | 'LOGIN'
     | 'LOGOUT'

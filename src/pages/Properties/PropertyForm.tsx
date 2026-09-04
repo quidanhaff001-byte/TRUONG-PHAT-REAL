@@ -86,6 +86,25 @@ export interface StagedImageItem {
   itemMetadata?: PropertyImageItem;
 }
 
+export const isLandType = (type?: string): boolean => {
+  if (!type) return false;
+  const t = type.toLowerCase();
+  return t.includes('đất') || t === 'đất nền' || t === 'đất thổ cư';
+};
+
+export const COMMON_HOUSE_AMENITIES = [
+  'Thang máy',
+  'Gara ô tô',
+  'Sân đỗ ô tô',
+  'Sân thượng',
+  'Hồ bơi',
+  'Nội thất cao cấp',
+  'Ban công',
+  'Giếng trời',
+  'Sân vườn',
+  'Hệ thống camera',
+];
+
 export const PropertyForm: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const isEditMode = Boolean(id);
@@ -111,7 +130,7 @@ export const PropertyForm: React.FC = () => {
     matchedProperties: [],
   });
 
-  // Form State
+  // Form State - Cleared all fake default values
   const [formData, setFormData] = useState<Partial<Property>>({
     title: '',
     description: '',
@@ -120,59 +139,59 @@ export const PropertyForm: React.FC = () => {
     propertyType: 'Nhà phố',
     status: 'Đang bán',
     
-    // Address & Geography
+    // Address & Geography strictly An Giang
     city: 'An Giang',
-    district: 'Thành phố Rạch Giá (cũ)',
-    ward: 'Phường Rạch Giá',
+    district: '',
+    ward: '',
     street: '',
     houseNumber: '',
     address: '',
     mapsUrl: '',
-    formerProvince: 'KIEN_GIANG_OLD',
-    formerDistrict: 'Thành phố Rạch Giá',
-    locationId: 'loc_rach_gia_01',
+    formerProvince: 'AN_GIANG_OLD',
+    formerDistrict: '',
+    locationId: '',
 
-    // Technical specs
-    landArea: 80,
-    usableArea: 240,
-    width: 4.5,
-    length: 18,
-    floors: 4,
-    bedrooms: 4,
-    bathrooms: 4,
-    direction: 'Đông Nam',
-    balconyDirection: 'Đông Nam',
-    roadWidth: 6,
-    structure: 'Bê tông cốt thép',
-    amenities: ['Thang máy', 'Sân đỗ ô tô', 'Nội thất cao cấp'],
+    // Technical specs (Initialized clean, no fake numbers)
+    landArea: undefined,
+    usableArea: undefined,
+    width: undefined,
+    length: undefined,
+    floors: undefined,
+    bedrooms: undefined,
+    bathrooms: undefined,
+    direction: undefined,
+    balconyDirection: undefined,
+    roadWidth: undefined,
+    structure: '',
+    amenities: [],
 
-    // Specific transaction details
-    salePrice: 12500000000,
+    // Specific transaction details (Initialized clean)
+    salePrice: undefined,
     rentPriceMonthly: undefined,
-    depositMonths: 2,
-    minLeaseTermMonths: 12,
+    depositMonths: undefined,
+    minLeaseTermMonths: undefined,
     transferPrice: undefined,
-    transferIncludesInventory: true,
+    transferIncludesInventory: false,
     transferInventoryDetails: '',
     monthlyRevenueEstimate: undefined,
     monthlyProfitEstimate: undefined,
-    commissionRateSale: 1.5,
-    commissionRateRentMonths: 1,
+    commissionRateSale: undefined,
+    commissionRateRentMonths: undefined,
 
-    // Legal
+    // Legal (No dummy planning/permit)
     legalType: 'Sổ hồng riêng',
     cadastralLotNumber: '',
     cadastralSheetNumber: '',
-    planningStatus: 'Quy hoạch đất ở đô thị lâu dài',
-    hasConstructionPermit: true,
+    planningStatus: '',
+    hasConstructionPermit: false,
 
-    // Owner
+    // Owner (Strictly confidential, no dummy text)
     ownerName: '',
     ownerPhone: '',
     ownerPhoneAlt: '',
     ownerIdentityNumber: '',
-    ownerRelationship: 'Chính chủ đứng tên sổ',
-    ownerContactNote: 'Gọi trước 30 phút khi dẫn khách',
+    ownerRelationship: '',
+    ownerContactNote: '',
 
     // Images
     images: [],
@@ -183,7 +202,7 @@ export const PropertyForm: React.FC = () => {
     assignedAgentId: currentUser?.id || users[0]?.id || '',
     teamId: currentUser?.teamId || teams[0]?.id || '',
     internalNotes: '',
-    keysLocation: 'Chìa khóa gửi tại văn phòng công ty',
+    keysLocation: '',
   });
 
   // Load existing property in edit mode
@@ -588,8 +607,18 @@ export const PropertyForm: React.FC = () => {
     // 4. Save Property document to Firestore / local state
     setUploadStatusText('Đang lưu thông tin BĐS...');
     try {
+      const isLand = isLandType(formData.propertyType);
       const propertyPayload: Partial<Property> = {
         ...formData,
+        ...(isLand
+          ? {
+              floors: 0,
+              bedrooms: 0,
+              bathrooms: 0,
+              usableArea: 0,
+              amenities: [],
+            }
+          : {}),
         id: propertyId,
         code: propertyCode,
         images: finalImageUrls,
@@ -633,12 +662,6 @@ export const PropertyForm: React.FC = () => {
               <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
                 {isEditMode ? `Chỉnh sửa BĐS ${formData.code || ''}` : 'Tiếp nhận ký gửi BĐS mới'}
               </h1>
-              {isStorageConfigured && (
-                <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  Storage Sẵn sàng
-                </span>
-              )}
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
               Nhập đầy đủ thông số kỹ thuật, quản lý ảnh thực tế và bảo mật thông tin chủ nhà.
@@ -703,7 +726,23 @@ export const PropertyForm: React.FC = () => {
               <label className="block text-xs font-semibold text-slate-700 mb-1">Loại hình sản phẩm *</label>
               <select
                 value={formData.propertyType}
-                onChange={(e) => setFormData({ ...formData, propertyType: e.target.value as any })}
+                onChange={(e) => {
+                  const newType = e.target.value;
+                  const isLand = isLandType(newType);
+                  setFormData({
+                    ...formData,
+                    propertyType: newType as any,
+                    ...(isLand
+                      ? {
+                          floors: 0,
+                          bedrooms: 0,
+                          bathrooms: 0,
+                          usableArea: 0,
+                          amenities: [],
+                        }
+                      : {}),
+                  });
+                }}
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-amber-500"
               >
                 {PROPERTY_TYPES.map((t) => (
@@ -734,7 +773,7 @@ export const PropertyForm: React.FC = () => {
             <label className="block text-xs font-semibold text-slate-700 mb-1">Tiêu đề tin đăng *</label>
             <input
               type="text"
-              placeholder="VD: Bán nhà phố mặt tiền Trần Hưng Đạo, Phường Mỹ Bình, TP. Long Xuyên (5x20m, 3 tầng)"
+              placeholder="VD: Bán nhà phố mặt tiền Trần Hưng Đạo, Phường Mỹ Bình, TP. Long Xuyên"
               value={formData.title}
               onChange={(e) => setFormData({ ...formData, title: e.target.value })}
               className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-amber-500"
@@ -742,22 +781,22 @@ export const PropertyForm: React.FC = () => {
           </div>
         </div>
 
-        {/* SECTION 2: Location & Address */}
+        {/* SECTION 2: Location & Address (Strictly An Giang) */}
         <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
             <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
               <MapPin className="w-4 h-4 text-amber-600" />
-              2. Vị trí & Địa bàn Tỉnh An Giang mới (bao gồm Kiên Giang cũ)
+              2. Vị trí & Địa bàn Tỉnh An Giang
             </h2>
             <span className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full font-medium">
-              Phạm vi hoạt động: Toàn tỉnh An Giang mới
+              Phạm vi quản lý: Tỉnh An Giang
             </span>
           </div>
 
           {/* Quick Location Preset Selector */}
           <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
             <label className="block text-xs font-bold text-slate-800">
-              Chọn nhanh địa bàn hành chính chuẩn:
+              Chọn nhanh đơn vị hành chính chuẩn (Tên xã/phường là dữ liệu chính):
             </label>
             <select
               value={formData.locationId || ''}
@@ -781,25 +820,14 @@ export const PropertyForm: React.FC = () => {
               }}
               className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 focus:ring-2 focus:ring-amber-500/50"
             >
-              <option value="">-- Chọn đơn vị hành chính (Phường / Xã / Đặc khu) --</option>
-              <optgroup label="📍 Khu vực Kiên Giang cũ (Rạch Giá, Phú Quốc, Hà Tiên, An Minh...)">
-                {locations
-                  .filter((l) => l.formerProvince === 'KIEN_GIANG_OLD' && l.active !== false)
-                  .map((loc) => (
-                    <option key={loc.id} value={loc.id}>
-                      {loc.currentName} — {loc.formerDistrictName}
-                    </option>
-                  ))}
-              </optgroup>
-              <optgroup label="📍 Khu vực An Giang cũ (Long Xuyên, Châu Đốc, Thoại Sơn...)">
-                {locations
-                  .filter((l) => l.formerProvince === 'AN_GIANG_OLD' && l.active !== false)
-                  .map((loc) => (
-                    <option key={loc.id} value={loc.id}>
-                      {loc.currentName} — {loc.formerDistrictName}
-                    </option>
-                  ))}
-              </optgroup>
+              <option value="">-- Chọn đơn vị hành chính Tỉnh An Giang (Xã / Phường / Thị trấn) --</option>
+              {locations
+                .filter((l) => l.active !== false)
+                .map((loc) => (
+                  <option key={loc.id} value={loc.id}>
+                    {loc.currentName} ({loc.formerDistrictName})
+                  </option>
+                ))}
             </select>
           </div>
 
@@ -807,7 +835,7 @@ export const PropertyForm: React.FC = () => {
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">Tỉnh / Thành phố *</label>
               <select
-                value={formData.city}
+                value={formData.city || 'An Giang'}
                 onChange={(e) => handleAddressFieldChange('city', e.target.value)}
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
               >
@@ -818,24 +846,24 @@ export const PropertyForm: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Quận / Huyện / TP cũ *</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Huyện / TP cũ (Chú thích)</label>
               <input
                 type="text"
-                value={formData.district}
+                value={formData.district || ''}
                 onChange={(e) => handleAddressFieldChange('district', e.target.value)}
-                placeholder="VD: Thành phố Rạch Giá, Huyện An Minh..."
+                placeholder="VD: Thành phố Long Xuyên, Huyện Thoại Sơn..."
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Phường / Xã / Thị trấn</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Xã / Phường / Thị trấn (Dữ liệu chính) *</label>
               <input
                 type="text"
-                value={formData.ward}
+                value={formData.ward || ''}
                 onChange={(e) => handleAddressFieldChange('ward', e.target.value)}
-                placeholder="VD: Phường Rạch Giá, Thị trấn Thứ 11..."
-                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
+                placeholder="VD: Phường Mỹ Bình, Xã Định Mỹ..."
+                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500 font-semibold"
               />
             </div>
 
@@ -843,9 +871,9 @@ export const PropertyForm: React.FC = () => {
               <label className="block text-xs font-semibold text-slate-700 mb-1">Tên đường / Tuyến Quốc lộ</label>
               <input
                 type="text"
-                value={formData.street}
+                value={formData.street || ''}
                 onChange={(e) => handleAddressFieldChange('street', e.target.value)}
-                placeholder="VD: Nguyễn Trung Trực, Quốc lộ 63..."
+                placeholder="VD: Trần Hưng Đạo, Quốc lộ 91..."
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
               />
             </div>
@@ -856,7 +884,7 @@ export const PropertyForm: React.FC = () => {
               <label className="block text-xs font-semibold text-slate-700 mb-1">Số nhà / Thửa đất / Ấp</label>
               <input
                 type="text"
-                value={formData.houseNumber}
+                value={formData.houseNumber || ''}
                 onChange={(e) => handleAddressFieldChange('houseNumber', e.target.value)}
                 placeholder="VD: Số 434A, Ấp 2..."
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
@@ -867,7 +895,7 @@ export const PropertyForm: React.FC = () => {
               <label className="block text-xs font-semibold text-slate-700 mb-1">Địa chỉ đầy đủ (Tự động tổng hợp)</label>
               <input
                 type="text"
-                value={formData.address}
+                value={formData.address || ''}
                 onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                 className="w-full px-3.5 py-2 bg-slate-100 border border-slate-200 rounded-xl text-xs text-slate-900 font-medium focus:outline-none focus:border-amber-500"
               />
@@ -877,39 +905,61 @@ export const PropertyForm: React.FC = () => {
 
         {/* SECTION 3: Technical Specs & Price */}
         <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
-          <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2 border-b border-slate-100 pb-3">
-            <Layers className="w-4 h-4 text-amber-600" />
-            3. Thông số kỹ thuật & Giá giao dịch
-          </h2>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+            <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+              <Layers className="w-4 h-4 text-amber-600" />
+              3. Thông số kỹ thuật & Giá giao dịch
+            </h2>
+            {isLandType(formData.propertyType) && (
+              <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
+                🌱 Chế độ Đất nền: Ẩn tiện ích nhà ở, số tầng/phòng/WC = 0
+              </span>
+            )}
+          </div>
 
+          {isLandType(formData.propertyType) && (
+            <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-xl text-xs text-amber-800">
+              💡 <strong>Lưu ý phân loại Đất nền:</strong> Số tầng, số phòng ngủ, số WC và diện tích sử dụng được tự động đặt bằng 0. Tiện ích nhà ở được ẩn khỏi biểu mẫu.
+            </div>
+          )}
+
+          {/* Area & Dimensions */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">Diện tích đất (m²) *</label>
               <input
                 type="number"
-                value={formData.landArea || ''}
+                min="0"
+                value={formData.landArea ?? ''}
                 onChange={(e) => setFormData({ ...formData, landArea: parseFloat(e.target.value) || 0 })}
+                placeholder="VD: 100"
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-amber-500"
               />
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Diện tích sử dụng (m²)</label>
-              <input
-                type="number"
-                value={formData.usableArea || ''}
-                onChange={(e) => setFormData({ ...formData, usableArea: parseFloat(e.target.value) || 0 })}
-                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
-              />
-            </div>
+            {!isLandType(formData.propertyType) && (
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Diện tích sử dụng (m²)</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={formData.usableArea ?? ''}
+                  onChange={(e) => setFormData({ ...formData, usableArea: parseFloat(e.target.value) || 0 })}
+                  placeholder="VD: 250"
+                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+            )}
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">Chiều ngang (m)</label>
               <input
                 type="number"
                 step="0.1"
-                value={formData.width || ''}
+                min="0"
+                value={formData.width ?? ''}
                 onChange={(e) => setFormData({ ...formData, width: parseFloat(e.target.value) || 0 })}
+                placeholder="VD: 5"
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
               />
             </div>
@@ -919,59 +969,152 @@ export const PropertyForm: React.FC = () => {
               <input
                 type="number"
                 step="0.1"
-                value={formData.length || ''}
+                min="0"
+                value={formData.length ?? ''}
                 onChange={(e) => setFormData({ ...formData, length: parseFloat(e.target.value) || 0 })}
+                placeholder="VD: 20"
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
               />
             </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Số tầng</label>
-              <input
-                type="number"
-                value={formData.floors || ''}
-                onChange={(e) => setFormData({ ...formData, floors: parseInt(e.target.value) || 0 })}
-                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
-              />
+          {/* Rooms and direction (Only when NOT Land) */}
+          {!isLandType(formData.propertyType) && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Số tầng</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={formData.floors ?? ''}
+                  onChange={(e) => setFormData({ ...formData, floors: parseInt(e.target.value) || 0 })}
+                  placeholder="VD: 3"
+                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Số phòng ngủ</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={formData.bedrooms ?? ''}
+                  onChange={(e) => setFormData({ ...formData, bedrooms: parseInt(e.target.value) || 0 })}
+                  placeholder="VD: 4"
+                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Số phòng tắm/WC</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={formData.bathrooms ?? ''}
+                  onChange={(e) => setFormData({ ...formData, bathrooms: parseInt(e.target.value) || 0 })}
+                  placeholder="VD: 3"
+                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Hướng nhà chính</label>
+                <select
+                  value={formData.direction || ''}
+                  onChange={(e) => setFormData({ ...formData, direction: e.target.value as any })}
+                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
+                >
+                  <option value="">-- Chọn hướng --</option>
+                  {DIRECTIONS.map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
+              </div>
             </div>
+          )}
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            {isLandType(formData.propertyType) && (
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Hướng đất chính</label>
+                <select
+                  value={formData.direction || ''}
+                  onChange={(e) => setFormData({ ...formData, direction: e.target.value as any })}
+                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
+                >
+                  <option value="">-- Chọn hướng --</option>
+                  {DIRECTIONS.map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Số phòng ngủ</label>
-              <input
-                type="number"
-                value={formData.bedrooms || ''}
-                onChange={(e) => setFormData({ ...formData, bedrooms: parseInt(e.target.value) || 0 })}
-                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Hướng nhà chính</label>
-              <select
-                value={formData.direction}
-                onChange={(e) => setFormData({ ...formData, direction: e.target.value as any })}
-                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
-              >
-                {DIRECTIONS.map((d) => (
-                  <option key={d} value={d}>{d}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Đường trước nhà (m)</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Đường trước BĐS (m)</label>
               <input
                 type="number"
                 step="0.5"
-                value={formData.roadWidth || ''}
+                min="0"
+                value={formData.roadWidth ?? ''}
                 onChange={(e) => setFormData({ ...formData, roadWidth: parseFloat(e.target.value) || 0 })}
+                placeholder="VD: 6"
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
               />
             </div>
+
+            {!isLandType(formData.propertyType) && (
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Kết cấu xây dựng</label>
+                <input
+                  type="text"
+                  value={formData.structure || ''}
+                  onChange={(e) => setFormData({ ...formData, structure: e.target.value })}
+                  placeholder="VD: Bê tông cốt thép, mái đúc..."
+                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+            )}
           </div>
 
+          {/* House Amenities (Only when NOT land) */}
+          {!isLandType(formData.propertyType) && (
+            <div className="pt-2 border-t border-slate-100">
+              <label className="block text-xs font-semibold text-slate-700 mb-2">Tiện ích nhà ở thực tế (Chọn nếu có):</label>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+                {COMMON_HOUSE_AMENITIES.map((amenity) => {
+                  const isChecked = formData.amenities?.includes(amenity) || false;
+                  return (
+                    <label
+                      key={amenity}
+                      className={`flex items-center gap-2 p-2 rounded-xl border text-xs cursor-pointer select-none transition-colors ${
+                        isChecked
+                          ? 'border-amber-500 bg-amber-50/60 font-semibold text-amber-900'
+                          : 'border-slate-200 hover:border-slate-300 text-slate-700 bg-white'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={(e) => {
+                          const current = formData.amenities || [];
+                          if (e.target.checked) {
+                            setFormData({ ...formData, amenities: [...current, amenity] });
+                          } else {
+                            setFormData({ ...formData, amenities: current.filter((a) => a !== amenity) });
+                          }
+                        }}
+                        className="rounded text-amber-600 focus:ring-amber-500"
+                      />
+                      <span>{amenity}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Transaction Price and Commission */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-100">
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -981,10 +1124,10 @@ export const PropertyForm: React.FC = () => {
                 type="number"
                 value={
                   formData.transactionType === 'SALE'
-                    ? formData.salePrice || ''
+                    ? formData.salePrice ?? ''
                     : formData.transactionType === 'RENT'
-                    ? formData.rentPriceMonthly || ''
-                    : formData.transferPrice || ''
+                    ? formData.rentPriceMonthly ?? ''
+                    : formData.transferPrice ?? ''
                 }
                 onChange={(e) => {
                   const val = parseFloat(e.target.value) || undefined;
@@ -993,7 +1136,7 @@ export const PropertyForm: React.FC = () => {
                   else setFormData({ ...formData, transferPrice: val });
                 }}
                 className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-amber-700 focus:outline-none focus:border-amber-500"
-                placeholder="VD: 12500000000 (12.5 tỷ)"
+                placeholder="VD: 3500000000 (3.5 tỷ)"
               />
             </div>
 
@@ -1002,7 +1145,7 @@ export const PropertyForm: React.FC = () => {
               <input
                 type="number"
                 step="0.1"
-                value={formData.commissionRateSale || 1.5}
+                value={formData.commissionRateSale ?? ''}
                 onChange={(e) => setFormData({ ...formData, commissionRateSale: parseFloat(e.target.value) || 0 })}
                 placeholder="VD: 1.5 (%) hoặc 1 (tháng)"
                 className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
@@ -1037,7 +1180,7 @@ export const PropertyForm: React.FC = () => {
               <input
                 type="text"
                 placeholder="VD: 142"
-                value={formData.cadastralLotNumber}
+                value={formData.cadastralLotNumber || ''}
                 onChange={(e) => setFormData({ ...formData, cadastralLotNumber: e.target.value })}
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500 font-mono"
               />
@@ -1048,10 +1191,35 @@ export const PropertyForm: React.FC = () => {
               <input
                 type="text"
                 placeholder="VD: 36"
-                value={formData.cadastralSheetNumber}
+                value={formData.cadastralSheetNumber || ''}
                 onChange={(e) => setFormData({ ...formData, cadastralSheetNumber: e.target.value })}
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500 font-mono"
               />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-100">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Tình trạng quy hoạch</label>
+              <input
+                type="text"
+                placeholder="VD: Đất ở đô thị (ODT), đất trồng cây lâu năm..."
+                value={formData.planningStatus || ''}
+                onChange={(e) => setFormData({ ...formData, planningStatus: e.target.value })}
+                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
+              />
+            </div>
+
+            <div className="flex items-center gap-3 pt-6">
+              <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-800">
+                <input
+                  type="checkbox"
+                  checked={Boolean(formData.hasConstructionPermit)}
+                  onChange={(e) => setFormData({ ...formData, hasConstructionPermit: e.target.checked })}
+                  className="rounded text-amber-600 focus:ring-amber-500"
+                />
+                <span>Có giấy phép xây dựng</span>
+              </label>
             </div>
           </div>
         </div>
@@ -1073,8 +1241,8 @@ export const PropertyForm: React.FC = () => {
               <label className="block text-xs font-semibold text-slate-700 mb-1">Họ tên chủ nhà *</label>
               <input
                 type="text"
-                placeholder="VD: Nguyễn Văn Hưng"
-                value={formData.ownerName}
+                placeholder="VD: Nguyễn Văn A"
+                value={formData.ownerName || ''}
                 onChange={(e) => setFormData({ ...formData, ownerName: e.target.value })}
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500 font-semibold"
               />
@@ -1085,7 +1253,7 @@ export const PropertyForm: React.FC = () => {
               <input
                 type="tel"
                 placeholder="VD: 0908123456"
-                value={formData.ownerPhone}
+                value={formData.ownerPhone || ''}
                 onChange={(e) => setFormData({ ...formData, ownerPhone: e.target.value })}
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500 font-mono font-semibold"
               />
@@ -1096,9 +1264,33 @@ export const PropertyForm: React.FC = () => {
               <input
                 type="tel"
                 placeholder="VD: 0912345678"
-                value={formData.ownerPhoneAlt}
+                value={formData.ownerPhoneAlt || ''}
                 onChange={(e) => setFormData({ ...formData, ownerPhoneAlt: e.target.value })}
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500 font-mono"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-100">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Mối quan hệ với bất động sản</label>
+              <input
+                type="text"
+                placeholder="VD: Chính chủ đứng tên sổ, người được ủy quyền..."
+                value={formData.ownerRelationship || ''}
+                onChange={(e) => setFormData({ ...formData, ownerRelationship: e.target.value })}
+                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Lưu ý khi liên hệ chủ nhà</label>
+              <input
+                type="text"
+                placeholder="VD: Gọi trước khi đến xem nhà..."
+                value={formData.ownerContactNote || ''}
+                onChange={(e) => setFormData({ ...formData, ownerContactNote: e.target.value })}
+                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-amber-500"
               />
             </div>
           </div>

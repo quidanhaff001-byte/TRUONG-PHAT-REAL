@@ -588,6 +588,15 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         deleteDoc(doc(db, 'commissions', orphan.id)).catch((err) => {
           console.warn('Failed to delete orphaned commission:', orphan.id, err);
         });
+        addAuditLog({
+          action: 'DELETE_ORPHAN_COMMISSION',
+          module: 'COMMISSIONS',
+          recordId: orphan.id,
+          recordCode: orphan.code,
+          description: `Hệ thống tự động dọn dẹp hoa hồng mồ côi [${orphan.code || orphan.id}] (dealId: ${orphan.dealId || 'không xác định'} không còn tồn tại)`,
+          oldData: orphan,
+          level: 'WARNING',
+        }).catch((err) => console.warn('Failed to log orphan commission deletion:', err));
       }
       setCommissions((prev) => prev.filter((c) => c.dealId && validDealIds.has(c.dealId)));
     }
@@ -727,7 +736,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setProperties((prev) => [sanitizedProp, ...prev]);
 
     await addAuditLog({
-      action: 'CREATE',
+      action: 'CREATE_PROPERTY',
       module: 'PROPERTIES',
       recordId: newId,
       recordCode: newCode,
@@ -1141,7 +1150,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setCustomers((prev) => [newCustomer, ...prev]);
 
     await addAuditLog({
-      action: 'CREATE',
+      action: 'CREATE_CUSTOMER',
       module: 'CUSTOMERS',
       recordId: newId,
       recordCode: newCode,
@@ -1486,7 +1495,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setAppointments((prev) => [sanitizedAppointment, ...prev.filter((a) => a.id !== newId)]);
 
     await addAuditLog({
-      action: 'CREATE',
+      action: 'CREATE_APPOINTMENT',
       module: 'APPOINTMENTS',
       recordId: newId,
       recordCode: newCode,
@@ -1638,7 +1647,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     await addAuditLog({
-      action: 'CREATE',
+      action: 'CREATE_TRANSACTION',
       module: 'TRANSACTIONS',
       recordId: newId,
       recordCode: newCode,
@@ -1647,6 +1656,18 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       newData: sanitizedTrans,
       level: 'INFO',
     });
+
+    if (newCommission) {
+      await addAuditLog({
+        action: 'CREATE_COMMISSION',
+        module: 'COMMISSIONS',
+        recordId: newCommission.id,
+        recordCode: newCommission.code,
+        description: `Tự động tạo hồ sơ hoa hồng [${newCommission.code}] cho giao dịch ${newCode}`,
+        newData: newCommission,
+        level: 'INFO',
+      });
+    }
 
     return { transaction: sanitizedTrans, commission: newCommission };
   };
@@ -1972,11 +1993,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     await addAuditLog({
-      action: 'CREATE',
+      action: 'CREATE_COMMISSION',
       module: 'COMMISSIONS',
       recordId: newId,
       recordCode: newCode,
       description: `Tạo bảng tính hoa hồng [${newCode}] cho giao dịch ${newComm.dealCode} (Tổng: ${newComm.totalExpectedCommission.toLocaleString('vi-VN')} đ)`,
+      newData: newComm,
       level: 'INFO',
     });
 

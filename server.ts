@@ -2,7 +2,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
-import { initializeApp, getApps, App } from 'firebase-admin/app';
+import { initializeApp, getApps, App, cert } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 import { getAuth, Auth, UserRecord } from 'firebase-admin/auth';
 
@@ -39,10 +39,36 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
+/**
+ * Standard API Response Helper
+ * Guaranteed schema across all /api endpoints:
+ * { success, errorCode, message, requestId, ...data }
+ */
+export function sendApiResponse(
+  res: Response,
+  statusCode: number,
+  data: {
+    success: boolean;
+    errorCode?: string | null;
+    message: string;
+    [key: string]: any;
+  }
+) {
+  const reqId = (res.getHeader('X-Request-Id') as string) || `req_${Date.now()}`;
+  return res.status(statusCode).json({
+    success: data.success,
+    errorCode: data.errorCode ?? (data.success ? null : 'ERROR'),
+    message: data.message,
+    requestId: reqId,
+    ...data,
+  });
+}
+
 // 1. Initialize Firebase Admin SDK
 let firebaseAdminApp: App | null = null;
 let adminDb: Firestore | null = null;
 let adminAuth: Auth | null = null;
+let isAdminSdkExplicitlyConfigured = false;
 
 try {
   let config: any = {};
@@ -51,13 +77,51 @@ try {
     config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   }
 
-  const projectId = config.projectId || process.env.FIREBASE_PROJECT_ID || 'airy-cogency-503707-p1';
+  const projectId =
+    config.projectId ||
+    process.env.FIREBASE_PROJECT_ID ||
+    process.env.VITE_FIREBASE_PROJECT_ID ||
+    'airy-cogency-503707-p1';
   const databaseId = config.firestoreDatabaseId || '(default)';
+
+  // Check for Firebase Admin credentials on Vercel or other cloud environments
+  let adminCredential: any = undefined;
+  const rawServiceAccount =
+    process.env.FIREBASE_SERVICE_ACCOUNT_KEY ||
+    process.env.FIREBASE_ADMIN_CREDENTIAL ||
+    process.env.FIREBASE_CONFIG_JSON;
+
+  if (rawServiceAccount) {
+    try {
+      const trimmed = rawServiceAccount.trim();
+      const parsed = trimmed.startsWith('{')
+        ? JSON.parse(trimmed)
+        : JSON.parse(Buffer.from(trimmed, 'base64').toString('utf8'));
+      adminCredential = cert(parsed);
+      isAdminSdkExplicitlyConfigured = true;
+      console.log('[Firebase Admin] Service account credential loaded from environment variable.');
+    } catch (parseErr: any) {
+      console.warn('[Firebase Admin] Notice: could not parse FIREBASE_SERVICE_ACCOUNT_KEY JSON:', parseErr.message);
+    }
+  } else if (process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_CLIENT_EMAIL) {
+    try {
+      adminCredential = cert({
+        projectId: process.env.FIREBASE_PROJECT_ID || projectId,
+        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+        privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      });
+      isAdminSdkExplicitlyConfigured = true;
+      console.log('[Firebase Admin] Credential loaded from FIREBASE_PRIVATE_KEY and FIREBASE_CLIENT_EMAIL.');
+    } catch (certErr: any) {
+      console.warn('[Firebase Admin] Notice: could not load cert from private key:', certErr.message);
+    }
+  }
 
   const existingApps = getApps();
   if (!existingApps.length) {
     firebaseAdminApp = initializeApp({
       projectId,
+      ...(adminCredential ? { credential: adminCredential } : {}),
       storageBucket: config.storageBucket,
     });
   } else {
@@ -65,7 +129,7 @@ try {
   }
 
   adminAuth = getAuth(firebaseAdminApp);
-  
+
   if (databaseId && databaseId !== '(default)') {
     adminDb = getFirestore(firebaseAdminApp, databaseId);
   } else {
@@ -289,30 +353,30 @@ interface AuthenticatedRequest extends Request {
 async function requireAdminAuth(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    res.status(401).json({
+    sendApiResponse(res, 401, {
       success: false,
-      code: 'UNAUTHORIZED',
-      error: 'Yêu cầu không hợp lệ. Vui lòng đăng nhập lại với quyền Quản trị viên.',
+      errorCode: 'UNAUTHORIZED',
+      message: 'Thiếu mã xác thực (Bearer Token). Vui lòng đăng nhập lại với quyền Quản trị viên.',
     });
     return;
   }
 
-  const idToken = authHeader.split('Bearer ')[1].trim();
+  const idToken = authHeader.split('Bearer ')[1]?.trim();
   if (!idToken) {
-    res.status(401).json({
+    sendApiResponse(res, 401, {
       success: false,
-      code: 'UNAUTHORIZED',
-      error: 'Token xác thực không hợp lệ hoặc đã hết hạn.',
+      errorCode: 'UNAUTHORIZED',
+      message: 'Token xác thực không hợp lệ hoặc đã hết hạn.',
     });
     return;
   }
 
   if (!adminAuth || !adminDb) {
-    res.status(503).json({
+    sendApiResponse(res, 503, {
       success: false,
-      code: 'BACKEND_NOT_CONFIGURED',
-      error: 'Chưa cấu hình dịch vụ tạo tài khoản.',
-      hint: 'Dịch vụ Firebase Admin SDK phía máy chủ chưa sẵn sàng.',
+      errorCode: 'BACKEND_NOT_CONFIGURED',
+      message: 'Backend tạo tài khoản chưa được cấu hình.',
+      details: 'Dịch vụ Firebase Admin SDK cần Service Account Key (FIREBASE_SERVICE_ACCOUNT_KEY).',
     });
     return;
   }
@@ -344,10 +408,10 @@ async function requireAdminAuth(req: AuthenticatedRequest, res: Response, next: 
     }
 
     if (role !== 'ADMIN') {
-      res.status(403).json({
+      sendApiResponse(res, 403, {
         success: false,
-        code: 'PERMISSION_DENIED',
-        error: 'Quyền truy cập bị từ chối. Chỉ Quản trị viên (ADMIN) mới có quyền tạo tài khoản nhân viên.',
+        errorCode: 'PERMISSION_DENIED',
+        message: 'Quyền truy cập bị từ chối. Chỉ Quản trị viên (ADMIN) mới có quyền thực hiện thao tác này.',
       });
       return;
     }
@@ -361,11 +425,11 @@ async function requireAdminAuth(req: AuthenticatedRequest, res: Response, next: 
 
     next();
   } catch (err: any) {
-    console.error('[Auth Error] verifyIdToken failed:', err.message);
-    res.status(401).json({
+    console.error('[Auth Error] verifyIdToken failed code:', err.code || 'N/A', 'message:', err.message || 'Unknown');
+    sendApiResponse(res, 401, {
       success: false,
-      code: 'UNAUTHORIZED',
-      error: 'Phiên đăng nhập đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại.',
+      errorCode: 'UNAUTHORIZED',
+      message: 'Phiên đăng nhập đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại.',
     });
   }
 }
@@ -401,12 +465,13 @@ app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRe
   const { employeeCode, fullName, email, phone, role, teamId, teamName, notes, tempPassword, sendEmailInvite, providedUid } = req.body;
   const ip = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '';
   const userAgent = req.headers['user-agent'] || '';
+  const reqId = (res.getHeader('X-Request-Id') as string) || `req_${Date.now()}`;
 
   if (!email || !fullName || !employeeCode || !phone) {
-    res.status(400).json({
+    sendApiResponse(res, 400, {
       success: false,
-      code: 'MISSING_FIELDS',
-      error: 'Vui lòng điền đầy đủ các thông tin bắt buộc: Họ tên, Email, SĐT, Mã nhân viên.',
+      errorCode: 'MISSING_FIELDS',
+      message: 'Vui lòng điền đầy đủ các thông tin bắt buộc: Họ tên, Email, SĐT, Mã nhân viên.',
     });
     return;
   }
@@ -414,10 +479,10 @@ app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRe
   // Validate email format
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!emailRegex.test(email.trim())) {
-    res.status(400).json({
+    sendApiResponse(res, 400, {
       success: false,
-      code: 'INVALID_EMAIL',
-      error: 'Địa chỉ email không hợp lệ. Vui lòng kiểm tra lại định dạng email.',
+      errorCode: 'INVALID_EMAIL',
+      message: 'Địa chỉ email không hợp lệ. Vui lòng kiểm tra lại định dạng email.',
     });
     return;
   }
@@ -426,11 +491,11 @@ app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRe
   const userRole = validRoles.includes(role) ? role : 'AGENT';
 
   if (!adminDb) {
-    res.status(503).json({
+    sendApiResponse(res, 503, {
       success: false,
-      code: 'BACKEND_NOT_CONFIGURED',
-      error: 'Chưa cấu hình dịch vụ tạo tài khoản.',
-      hint: 'Dịch vụ Firestore phía máy chủ chưa sẵn sàng.',
+      errorCode: 'BACKEND_NOT_CONFIGURED',
+      message: 'Backend tạo tài khoản chưa được cấu hình.',
+      details: 'Dịch vụ Firestore phía máy chủ chưa sẵn sàng.',
     });
     return;
   }
@@ -439,10 +504,10 @@ app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRe
   try {
     const duplicateInDb = await adminDb.collection('users').where('email', '==', email.trim().toLowerCase()).get();
     if (!duplicateInDb.empty) {
-      res.status(400).json({
+      sendApiResponse(res, 400, {
         success: false,
-        code: 'EMAIL_EXISTS',
-        error: 'Email này đã được sử dụng cho một tài khoản khác trong hệ thống.',
+        errorCode: 'EMAIL_EXISTS',
+        message: 'Email này đã được sử dụng cho một tài khoản khác trong hệ thống.',
       });
       return;
     }
@@ -456,9 +521,10 @@ app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRe
     try {
       const existingDoc = await adminDb.collection('users').doc(targetUid).get();
       if (existingDoc.exists) {
-        res.status(400).json({
+        sendApiResponse(res, 400, {
           success: false,
-          error: 'Hồ sơ nhân sự cho UID này đã tồn tại trong hệ thống.',
+          errorCode: 'USER_EXISTS',
+          message: 'Hồ sơ nhân sự cho UID này đã tồn tại trong hệ thống.',
         });
         return;
       }
@@ -535,7 +601,7 @@ app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRe
         'SUCCESS'
       );
 
-      res.json({
+      sendApiResponse(res, 200, {
         success: true,
         message: 'Đã tạo hồ sơ nhân viên thành công liên kết với User UID từ Firebase Authentication.',
         user: {
@@ -553,10 +619,11 @@ app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRe
       });
       return;
     } catch (manualErr: any) {
-      console.error('[providedUid] Error saving profile:', manualErr);
-      res.status(500).json({
+      console.error(`[providedUid][${reqId}] Error saving profile:`, manualErr.message);
+      sendApiResponse(res, 400, {
         success: false,
-        error: `Không thể tạo hồ sơ nhân viên: ${manualErr.message || 'Lỗi cơ sở dữ liệu'}`,
+        errorCode: 'PROFILE_SAVE_FAILED',
+        message: `Không thể tạo hồ sơ nhân viên: ${manualErr.message || 'Lỗi cơ sở dữ liệu'}`,
       });
       return;
     }
@@ -564,10 +631,11 @@ app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRe
 
   // CASE B: Standard Automated Creation via Firebase Admin SDK
   if (!adminAuth) {
-    res.status(503).json({
+    sendApiResponse(res, 503, {
       success: false,
-      code: 'BACKEND_NOT_CONFIGURED',
-      error: 'Chưa cấu hình dịch vụ tạo tài khoản.',
+      errorCode: 'BACKEND_NOT_CONFIGURED',
+      message: 'Backend tạo tài khoản chưa được cấu hình.',
+      details: 'Dịch vụ Firebase Admin SDK cần Service Account Key (FIREBASE_SERVICE_ACCOUNT_KEY trên Vercel).',
       hint: 'Tạm thời Quản trị viên có thể tạo user trong Firebase Console (Authentication > Users > Add user), sau đó thêm hồ sơ users/{uid}.',
     });
     return;
@@ -581,10 +649,10 @@ app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRe
     if (initialPassword) {
       const check = validatePasswordComplexity(initialPassword);
       if (!check.valid) {
-        res.status(400).json({
+        sendApiResponse(res, 400, {
           success: false,
-          code: 'WEAK_PASSWORD',
-          error: check.reason || 'Mật khẩu không đủ mạnh. Mật khẩu phải có tối thiểu 8 ký tự, bao gồm chữ hoa, chữ thường, chữ số và ký tự đặc biệt.',
+          errorCode: 'WEAK_PASSWORD',
+          message: check.reason || 'Mật khẩu không đủ mạnh. Mật khẩu phải có tối thiểu 8 ký tự, bao gồm chữ hoa, chữ thường, chữ số và ký tự đặc biệt.',
         });
         return;
       }
@@ -599,10 +667,10 @@ app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRe
       existingUser = await adminAuth.getUserByEmail(email.trim().toLowerCase());
     } catch (e: any) {
       if (e.code === 'auth/email-already-exists') {
-        res.status(400).json({
+        sendApiResponse(res, 400, {
           success: false,
-          code: 'EMAIL_EXISTS',
-          error: 'Email này đã được sử dụng cho một tài khoản khác trong hệ thống.',
+          errorCode: 'EMAIL_EXISTS',
+          message: 'Email này đã được sử dụng cho một tài khoản khác trong hệ thống.',
         });
         return;
       }
@@ -613,10 +681,10 @@ app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRe
     }
 
     if (existingUser) {
-      res.status(400).json({
+      sendApiResponse(res, 400, {
         success: false,
-        code: 'EMAIL_EXISTS',
-        error: 'Email này đã được sử dụng cho một tài khoản khác trong hệ thống.',
+        errorCode: 'EMAIL_EXISTS',
+        message: 'Email này đã được sử dụng cho một tài khoản khác trong hệ thống.',
       });
       return;
     }
@@ -666,7 +734,26 @@ app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRe
       dealsCount: 0,
     });
 
-    await adminDb.collection('users').doc(uid).set(newUserDoc);
+    try {
+      await adminDb.collection('users').doc(uid).set(newUserDoc);
+    } catch (firestoreErr: any) {
+      console.error(`[adminCreateUser][${reqId}] Firestore write failed:`, firestoreErr.message);
+      // Rollback Auth user immediately to prevent orphaned users
+      if (createdAuthUser) {
+        try {
+          await adminAuth.deleteUser(createdAuthUser.uid);
+          console.log(`[Rollback][${reqId}] Deleted orphaned Auth user: ${createdAuthUser.uid}`);
+        } catch (rbErr: any) {
+          console.error(`[Rollback][${reqId}] deleteUser failed:`, rbErr.message);
+        }
+      }
+      sendApiResponse(res, 400, {
+        success: false,
+        errorCode: 'FIRESTORE_FAILED',
+        message: `Lưu hồ sơ Firestore thất bại: ${firestoreErr.message || 'Lỗi kết nối'}. Hệ thống đã tự động hoàn tác (rollback) tài khoản Auth.`,
+      });
+      return;
+    }
 
     // If assigned to a team, update team's memberIds
     if (teamId) {
@@ -702,7 +789,7 @@ app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRe
     );
 
     // Return sanitized response (never expose password in response, DOM, console or UI)
-    res.json({
+    sendApiResponse(res, 200, {
       success: true,
       message: 'Tạo tài khoản nhân viên thành công trên Firebase Authentication và Firestore.',
       user: {
@@ -719,15 +806,15 @@ app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRe
       },
     });
   } catch (err: any) {
-    console.error('[adminCreateUser] Error:', err);
+    console.error(`[adminCreateUser][${reqId}] Code: ${err.code || 'N/A'}, Message: ${err.message || 'Unknown'}`);
 
-    // Rollback Auth user if created but Firestore failed
+    // Rollback Auth user if created but error occurred
     if (createdAuthUser) {
       try {
         await adminAuth.deleteUser(createdAuthUser.uid);
-        console.log(`[Rollback] Đã xóa Auth user mồ côi: ${createdAuthUser.uid}`);
-      } catch (rollbackErr) {
-        console.error('Rollback deleteUser failed:', rollbackErr);
+        console.log(`[Rollback][${reqId}] Đã xóa Auth user mồ côi: ${createdAuthUser.uid}`);
+      } catch (rollbackErr: any) {
+        console.error(`[Rollback][${reqId}] deleteUser failed:`, rollbackErr.message);
       }
     }
 
@@ -747,28 +834,28 @@ app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRe
 
     // Handle specific error codes in Vietnamese
     if (err.code === 'auth/email-already-exists') {
-      res.status(400).json({
+      sendApiResponse(res, 400, {
         success: false,
-        code: 'EMAIL_EXISTS',
-        error: 'Email này đã được sử dụng cho một tài khoản khác trong hệ thống.',
+        errorCode: 'EMAIL_EXISTS',
+        message: 'Email này đã được sử dụng cho một tài khoản khác trong hệ thống.',
       });
       return;
     }
 
     if (err.code === 'auth/invalid-email') {
-      res.status(400).json({
+      sendApiResponse(res, 400, {
         success: false,
-        code: 'INVALID_EMAIL',
-        error: 'Địa chỉ email không hợp lệ. Vui lòng kiểm tra lại định dạng email.',
+        errorCode: 'INVALID_EMAIL',
+        message: 'Địa chỉ email không hợp lệ. Vui lòng kiểm tra lại định dạng email.',
       });
       return;
     }
 
     if (err.code === 'auth/weak-password') {
-      res.status(400).json({
+      sendApiResponse(res, 400, {
         success: false,
-        code: 'WEAK_PASSWORD',
-        error: 'Mật khẩu không đủ mạnh. Mật khẩu phải có tối thiểu 8 ký tự, bao gồm chữ hoa, chữ thường, chữ số và ký tự đặc biệt.',
+        errorCode: 'WEAK_PASSWORD',
+        message: 'Mật khẩu không đủ mạnh. Mật khẩu phải có tối thiểu 8 ký tự, bao gồm chữ hoa, chữ thường, chữ số và ký tự đặc biệt.',
       });
       return;
     }
@@ -783,19 +870,20 @@ app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRe
       err.message?.includes('Default Credentials');
 
     if (isBackendConfigError) {
-      res.status(503).json({
+      sendApiResponse(res, 503, {
         success: false,
-        code: 'BACKEND_NOT_CONFIGURED',
-        error: 'Chưa cấu hình dịch vụ tạo tài khoản.',
-        details: 'Dịch vụ Firebase Admin SDK cần Service Account Key hoặc Identity Toolkit API để tạo tài khoản tự động.',
+        errorCode: 'BACKEND_NOT_CONFIGURED',
+        message: 'Backend tạo tài khoản chưa được cấu hình.',
+        details: 'Dịch vụ Firebase Admin SDK cần Service Account Key (FIREBASE_SERVICE_ACCOUNT_KEY trên Vercel) để tạo tài khoản trực tiếp.',
         hint: 'Tạm thời Quản trị viên có thể tạo user trong Firebase Console (Authentication > Users > Add user), sau đó thêm hồ sơ users/{uid}.',
       });
       return;
     }
 
-    res.status(500).json({
+    sendApiResponse(res, 400, {
       success: false,
-      error: `Không thể tạo tài khoản: ${err.message || 'Lỗi hệ thống'}`,
+      errorCode: 'CREATE_USER_FAILED',
+      message: `Không thể tạo tài khoản nhân viên: ${err.message || 'Lỗi không xác định.'}`,
     });
   }
 });

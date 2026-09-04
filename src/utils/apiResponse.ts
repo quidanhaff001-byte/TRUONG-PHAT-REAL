@@ -47,9 +47,9 @@ export async function parseResponseSafe<T = any>(response: Response, endpoint?: 
     if (contentType.includes('application/json')) {
       try {
         parsedData = JSON.parse(raw);
-        message = parsedData.error || parsedData.message || message;
-        code = parsedData.code;
-        hint = parsedData.hint;
+        message = parsedData.message || parsedData.error || message;
+        code = parsedData.errorCode || parsedData.code;
+        hint = parsedData.hint || parsedData.details;
       } catch {
         // Fallback
       }

@@ -36,14 +36,18 @@ export const AuditLogs: React.FC = () => {
   const filteredLogs = useMemo(() => {
     return auditLogs.filter((log) => {
       if (filterModule !== 'ALL' && log.module !== filterModule) return false;
-      if (filterAction !== 'ALL' && log.action !== filterAction) return false;
+      if (filterAction !== 'ALL') {
+        if (filterAction === 'CREATE' && !log.action.startsWith('CREATE')) return false;
+        else if (filterAction === 'DELETE' && !log.action.startsWith('DELETE')) return false;
+        else if (filterAction !== 'CREATE' && filterAction !== 'DELETE' && log.action !== filterAction) return false;
+      }
       if (filterUserId !== 'ALL' && log.userId !== filterUserId) return false;
 
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
-        const matchUser = log.userName.toLowerCase().includes(q) || log.userEmail?.toLowerCase().includes(q);
-        const matchDetails = log.details.toLowerCase().includes(q);
-        const matchRecId = log.recordId?.toLowerCase().includes(q);
+        const matchUser = (log.userName || '').toLowerCase().includes(q) || (log.userEmail || '').toLowerCase().includes(q);
+        const matchDetails = (log.details || log.description || '').toLowerCase().includes(q);
+        const matchRecId = (log.recordId || log.recordCode || '').toLowerCase().includes(q);
         if (!matchUser && !matchDetails && !matchRecId) return false;
       }
 
@@ -54,13 +58,29 @@ export const AuditLogs: React.FC = () => {
   const getActionBadgeVariant = (action: AuditLog['action']) => {
     switch (action) {
       case 'CREATE':
+      case 'CREATE_PROPERTY':
+      case 'CREATE_CUSTOMER':
+      case 'CREATE_APPOINTMENT':
+      case 'CREATE_TRANSACTION':
+      case 'CREATE_COMMISSION':
+      case 'CREATE_RENTAL':
+      case 'CREATE_USER':
         return 'success';
       case 'UPDATE':
+      case 'UPDATE_USER':
       case 'STATUS_CHANGE':
+      case 'SPLIT_COMMISSION':
+      case 'SETTINGS_CHANGE':
         return 'primary';
       case 'DELETE':
+      case 'DELETE_USER':
+      case 'DELETE_ORPHAN_COMMISSION':
+      case 'LOCK_USER':
         return 'danger';
       case 'RESTORE':
+      case 'UNLOCK_USER':
+      case 'PASSWORD_RESET':
+      case 'TEMP_PASSWORD':
         return 'warning';
       default:
         return 'neutral';
@@ -212,7 +232,7 @@ export const AuditLogs: React.FC = () => {
                     </div>
 
                     <div className="text-slate-700 font-medium bg-slate-50/70 p-2 rounded-lg border border-slate-100">
-                      {log.details}
+                      {log.description || log.details || 'Không có chi tiết bổ sung'}
                     </div>
 
                     <div className="flex items-center gap-4 text-[11px] text-slate-400">
