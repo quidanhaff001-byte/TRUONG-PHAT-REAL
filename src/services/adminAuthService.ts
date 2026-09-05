@@ -1,6 +1,6 @@
 import { auth, db } from '../config/firebase';
 import { doc, updateDoc, deleteDoc } from 'firebase/firestore';
-import { User, UserRole } from '../types';
+import { User, UserRole, CustomRole, WorkStatus } from '../types';
 import { parseResponseSafe } from '../utils/apiResponse';
 import { mapErrorMessage } from '../utils/errorMapper';
 
@@ -20,9 +20,12 @@ export interface CreateUserInput {
   fullName: string;
   email: string;
   phone: string;
-  role: UserRole;
+  role: string;
+  roleName?: string;
   teamId?: string | null;
   teamName?: string;
+  department?: string;
+  workStatus?: WorkStatus;
   notes?: string;
   tempPassword?: string;
   sendEmailInvite?: boolean;
@@ -36,12 +39,21 @@ export interface UpdateUserInput {
   fullName?: string;
   email?: string;
   phone?: string;
-  role?: UserRole;
+  role?: string;
+  roleName?: string;
   teamId?: string | null;
   teamName?: string;
+  department?: string;
+  directManagerId?: string | null;
+  directManagerName?: string;
+  dateOfBirth?: string;
+  address?: string;
   status?: 'ACTIVE' | 'LOCKED' | 'SUSPENDED';
+  workStatus?: WorkStatus;
   notes?: string;
   avatarUrl?: string;
+  customPermissions?: Record<string, boolean>;
+  roleHistory?: any[];
 }
 
 /**
@@ -385,6 +397,232 @@ export async function adminResolveOrphanUserApi(
     const resData = await parseResponseSafe<{ success: boolean; message: string }>(res, endpoint);
     if (!resData || !resData.success) {
       throw new Error(resData?.message || 'Không thể xử lý hồ sơ mồ côi.');
+    }
+    return resData;
+  } catch (err: any) {
+    throw new Error(mapErrorMessage(err));
+  }
+}
+
+/**
+ * Luân chuyển chức vụ nhân sự kèm lý do và ghi nhận lịch sử chức vụ
+ */
+export async function adminChangeRoleApi(data: {
+  uid: string;
+  newRole: string;
+  newRoleName?: string;
+  reason?: string;
+}): Promise<{ success: boolean; message: string; role?: string; roleName?: string; roleHistory?: any[] }> {
+  const endpoint = '/api/admin/change-user-role';
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify(data),
+    });
+
+    const resData = await parseResponseSafe<{
+      success: boolean;
+      message: string;
+      role?: string;
+      roleName?: string;
+      roleHistory?: any[];
+    }>(res, endpoint);
+
+    if (!resData || !resData.success) {
+      throw new Error(resData?.message || 'Không thể luân chuyển chức vụ.');
+    }
+
+    if (auth.currentUser && auth.currentUser.uid === data.uid) {
+      try {
+        await auth.currentUser.getIdToken(true);
+      } catch (e) {
+        console.warn('Lỗi làm mới token của người dùng hiện tại:', e);
+      }
+    }
+
+    return resData;
+  } catch (err: any) {
+    throw new Error(mapErrorMessage(err));
+  }
+}
+
+/**
+ * Điều chỉnh phân quyền riêng cho từng nhân sự (Granular Permissions Override)
+ */
+export async function adminSetUserPermissionsApi(data: {
+  uid: string;
+  customPermissions: Record<string, boolean>;
+}): Promise<{ success: boolean; message: string; customPermissions?: Record<string, boolean> }> {
+  const endpoint = '/api/admin/set-user-permissions';
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify(data),
+    });
+
+    const resData = await parseResponseSafe<{
+      success: boolean;
+      message: string;
+      customPermissions?: Record<string, boolean>;
+    }>(res, endpoint);
+
+    if (!resData || !resData.success) {
+      throw new Error(resData?.message || 'Không thể cập nhật phân quyền riêng.');
+    }
+
+    return resData;
+  } catch (err: any) {
+    throw new Error(mapErrorMessage(err));
+  }
+}
+
+/**
+ * Điều chuyển phòng ban, đội nhóm và chuyển giao khách hàng
+ */
+export async function adminTransferTeamApi(data: {
+  uid: string;
+  newTeamId: string | null;
+  newTeamName?: string;
+  newDepartment?: string;
+  newLeaderId?: string | null;
+  newLeaderName?: string;
+  customerTransferMode: 'KEEP' | 'ALL' | 'SELECTED';
+  targetUserId?: string;
+  targetUserName?: string;
+  selectedCustomerIds?: string[];
+}): Promise<{ success: boolean; message: string; reassignCount?: number }> {
+  const endpoint = '/api/admin/transfer-user-team';
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify(data),
+    });
+
+    const resData = await parseResponseSafe<{
+      success: boolean;
+      message: string;
+      reassignCount?: number;
+    }>(res, endpoint);
+
+    if (!resData || !resData.success) {
+      throw new Error(resData?.message || 'Không thể điều chuyển nhân sự.');
+    }
+
+    return resData;
+  } catch (err: any) {
+    throw new Error(mapErrorMessage(err));
+  }
+}
+
+/**
+ * Lấy danh sách các chức vụ động (Dynamic Roles)
+ */
+export async function adminGetRolesApi(): Promise<{ success: boolean; roles: CustomRole[] }> {
+  const endpoint = '/api/admin/roles';
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(endpoint, {
+      method: 'GET',
+      headers: {
+        ...headers,
+      },
+    });
+
+    const resData = await parseResponseSafe<{ success: boolean; roles: CustomRole[] }>(res, endpoint);
+    if (!resData || !resData.success) {
+      return { success: false, roles: [] };
+    }
+    return resData;
+  } catch (err: any) {
+    console.warn('Lỗi lấy danh sách chức vụ:', err);
+    return { success: false, roles: [] };
+  }
+}
+
+/**
+ * Tạo chức vụ mới
+ */
+export async function adminCreateRoleApi(data: Partial<CustomRole>): Promise<{ success: boolean; message: string; role?: CustomRole }> {
+  const endpoint = '/api/admin/roles';
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify(data),
+    });
+
+    const resData = await parseResponseSafe<{ success: boolean; message: string; role?: CustomRole }>(res, endpoint);
+    if (!resData || !resData.success) {
+      throw new Error(resData?.message || 'Không thể tạo chức vụ.');
+    }
+    return resData;
+  } catch (err: any) {
+    throw new Error(mapErrorMessage(err));
+  }
+}
+
+/**
+ * Cập nhật chức vụ
+ */
+export async function adminUpdateRoleApi(roleId: string, data: Partial<CustomRole>): Promise<{ success: boolean; message: string; role?: CustomRole }> {
+  const endpoint = `/api/admin/roles/${encodeURIComponent(roleId)}`;
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(endpoint, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify(data),
+    });
+
+    const resData = await parseResponseSafe<{ success: boolean; message: string; role?: CustomRole }>(res, endpoint);
+    if (!resData || !resData.success) {
+      throw new Error(resData?.message || 'Không thể cập nhật chức vụ.');
+    }
+    return resData;
+  } catch (err: any) {
+    throw new Error(mapErrorMessage(err));
+  }
+}
+
+/**
+ * Xóa chức vụ
+ */
+export async function adminDeleteRoleApi(roleId: string): Promise<{ success: boolean; message: string }> {
+  const endpoint = `/api/admin/roles/${encodeURIComponent(roleId)}`;
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(endpoint, {
+      method: 'DELETE',
+      headers: {
+        ...headers,
+      },
+    });
+
+    const resData = await parseResponseSafe<{ success: boolean; message: string }>(res, endpoint);
+    if (!resData || !resData.success) {
+      throw new Error(resData?.message || 'Không thể xóa chức vụ.');
     }
     return resData;
   } catch (err: any) {

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useData } from '../../context/DataContext';
 import { useAuth, getRoleName } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -35,8 +35,11 @@ import {
   ExternalLink,
   AlertCircle,
   Terminal,
+  History,
+  Sparkles,
+  SlidersHorizontal,
 } from 'lucide-react';
-import { User, Team, UserRole } from '../../types';
+import { User, Team, UserRole, CustomRole } from '../../types';
 import { RoleBadge } from '../../components/common/Badge';
 import { Avatar } from '../../components/common/Avatar';
 import { uploadUserAvatar } from '../../utils/fileUpload';
@@ -52,7 +55,15 @@ import {
   adminRevokeUserSessionsApi,
   adminDeleteUserApi,
   adminAssignUserToTeamApi,
+  adminGetRolesApi,
 } from '../../services/adminAuthService';
+import { DEFAULT_SYSTEM_ROLES, getRoleDisplayName } from '../../constants/permissions';
+import { EditProfileModal } from './components/EditProfileModal';
+import { ChangeRoleModal } from './components/ChangeRoleModal';
+import { PermissionsModal } from './components/PermissionsModal';
+import { TransferTeamModal } from './components/TransferTeamModal';
+import { RoleManagementModal } from './components/RoleManagementModal';
+import { RoleHistoryModal } from './components/RoleHistoryModal';
 
 export const UserList: React.FC = () => {
   const { users, teams, addTeam, updateTeam, deleteTeam } = useData();
@@ -64,6 +75,42 @@ export const UserList: React.FC = () => {
   const [roleFilter, setRoleFilter] = useState<string>('ALL');
   const [teamFilter, setTeamFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
+
+  // Dynamic Roles & HR Management State
+  const [customRoles, setCustomRoles] = useState<CustomRole[]>(DEFAULT_SYSTEM_ROLES);
+  const [editingProfileUser, setEditingProfileUser] = useState<User | null>(null);
+  const [changingRoleUser, setChangingRoleUser] = useState<User | null>(null);
+  const [settingPermissionsUser, setSettingPermissionsUser] = useState<User | null>(null);
+  const [transferringTeamUser, setTransferringTeamUser] = useState<User | null>(null);
+  const [viewingHistoryUser, setViewingHistoryUser] = useState<User | null>(null);
+  const [showRoleManagementModal, setShowRoleManagementModal] = useState<boolean>(false);
+
+  // Fetch dynamic roles from server
+  useEffect(() => {
+    let isMounted = true;
+    adminGetRolesApi()
+      .then((res) => {
+        if (!isMounted) return;
+        if (res.success && Array.isArray(res.roles) && res.roles.length > 0) {
+          const merged = [...DEFAULT_SYSTEM_ROLES];
+          res.roles.forEach((r) => {
+            const idx = merged.findIndex((m) => m.code === r.code);
+            if (idx >= 0) {
+              merged[idx] = r;
+            } else {
+              merged.push(r);
+            }
+          });
+          setCustomRoles(merged);
+        }
+      })
+      .catch((err) => {
+        console.warn('Could not load custom roles from backend:', err);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Loading indicator for async Admin actions
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -652,7 +699,14 @@ export const UserList: React.FC = () => {
         </div>
 
         {isAdmin && (
-          <div className="flex items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              onClick={() => setShowRoleManagementModal(true)}
+              className="flex items-center gap-2 px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl border border-slate-300 shadow-xs transition-all cursor-pointer"
+            >
+              <Shield className="w-4 h-4 text-[#D4AF37]" />
+              <span>Chức vụ & Phân quyền</span>
+            </button>
             <button
               onClick={() => handleOpenTeamModal()}
               className="flex items-center gap-2 px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl border border-slate-300 shadow-xs transition-all cursor-pointer"
@@ -719,10 +773,12 @@ export const UserList: React.FC = () => {
                 onChange={(e) => setRoleFilter(e.target.value)}
                 className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 font-semibold focus:outline-none"
               >
-                <option value="ALL">Tất cả vai trò</option>
-                <option value="ADMIN">Quản trị viên (ADMIN)</option>
-                <option value="TEAM_LEADER">Trưởng nhóm (TEAM_LEADER)</option>
-                <option value="AGENT">Môi giới (AGENT)</option>
+                <option value="ALL">Tất cả chức vụ</option>
+                {customRoles.map((r) => (
+                  <option key={r.code} value={r.code}>
+                    {r.name} ({r.code})
+                  </option>
+                ))}
               </select>
 
               <select
@@ -807,12 +863,31 @@ export const UserList: React.FC = () => {
                             )}
                           </div>
                           <div className="text-xs font-bold text-slate-500">{u.employeeCode}</div>
-                          <div className="mt-1 flex items-center gap-1.5">
+                          <div className="mt-1 flex items-center gap-1.5 flex-wrap">
                             <RoleBadge role={u.role} />
-                            {u.status === 'LOCKED' && (
+                            {u.workStatus === 'ON_LEAVE' && (
+                              <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
+                                🟡 Tạm nghỉ
+                              </span>
+                            )}
+                            {u.workStatus === 'RESIGNED' && (
+                              <span className="text-[10px] font-bold bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full">
+                                🔴 Nghỉ việc
+                              </span>
+                            )}
+                            {u.status === 'LOCKED' && u.workStatus !== 'RESIGNED' && (
                               <span className="text-[10px] font-bold bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full flex items-center gap-1">
                                 <Lock className="w-3 h-3" />
                                 Đã khóa
+                              </span>
+                            )}
+                            {u.customPermissions && Object.keys(u.customPermissions).length > 0 && (
+                              <span
+                                className="text-[10px] font-bold bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded-full flex items-center gap-0.5"
+                                title="Có phân quyền riêng"
+                              >
+                                <Sparkles className="w-2.5 h-2.5" />
+                                <span>Quyền riêng</span>
                               </span>
                             )}
                           </div>
@@ -830,36 +905,64 @@ export const UserList: React.FC = () => {
                           </button>
 
                           {isMenuOpen && (
-                            <div className="absolute right-0 mt-1 w-56 bg-white rounded-2xl shadow-xl border border-slate-200 py-1.5 z-40 text-xs animate-in fade-in zoom-in-95">
+                            <div className="absolute right-0 mt-1 w-60 bg-white rounded-2xl shadow-xl border border-slate-200 py-1.5 z-40 text-xs animate-in fade-in zoom-in-95">
                               <div className="px-3 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                                Quản lý tài khoản
+                                Quản trị nhân sự (HR)
                               </div>
 
                               <button
                                 onClick={() => {
                                   setOpenActionMenuId(null);
-                                  handleOpenUserModal(u);
+                                  setEditingProfileUser(u);
                                 }}
                                 className="w-full flex items-center gap-2 px-3 py-2 text-slate-700 hover:bg-slate-50 text-left font-medium cursor-pointer"
                               >
-                                <Edit className="w-3.5 h-3.5 text-slate-500" />
-                                <span>Sửa thông tin</span>
+                                <Edit className="w-3.5 h-3.5 text-indigo-600" />
+                                <span>Chỉnh sửa hồ sơ NV</span>
                               </button>
 
                               <button
-                                onClick={() => handleOpenRoleChange(u)}
+                                onClick={() => {
+                                  setOpenActionMenuId(null);
+                                  setChangingRoleUser(u);
+                                }}
                                 className="w-full flex items-center gap-2 px-3 py-2 text-slate-700 hover:bg-slate-50 text-left font-medium cursor-pointer"
                               >
                                 <Shield className="w-3.5 h-3.5 text-[#b38e22]" />
-                                <span>Phân quyền (Role)</span>
+                                <span>Luân chuyển chức vụ</span>
                               </button>
 
                               <button
-                                onClick={() => handleOpenTeamChange(u)}
+                                onClick={() => {
+                                  setOpenActionMenuId(null);
+                                  setSettingPermissionsUser(u);
+                                }}
                                 className="w-full flex items-center gap-2 px-3 py-2 text-slate-700 hover:bg-slate-50 text-left font-medium cursor-pointer"
                               >
-                                <Building className="w-3.5 h-3.5 text-slate-500" />
-                                <span>Chuyển nhóm kinh doanh</span>
+                                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>Phân quyền riêng</span>
+                              </button>
+
+                              <button
+                                onClick={() => {
+                                  setOpenActionMenuId(null);
+                                  setTransferringTeamUser(u);
+                                }}
+                                className="w-full flex items-center gap-2 px-3 py-2 text-slate-700 hover:bg-slate-50 text-left font-medium cursor-pointer"
+                              >
+                                <Building className="w-3.5 h-3.5 text-cyan-600" />
+                                <span>Điều chuyển phòng / nhóm</span>
+                              </button>
+
+                              <button
+                                onClick={() => {
+                                  setOpenActionMenuId(null);
+                                  setViewingHistoryUser(u);
+                                }}
+                                className="w-full flex items-center gap-2 px-3 py-2 text-slate-700 hover:bg-slate-50 text-left font-medium cursor-pointer"
+                              >
+                                <History className="w-3.5 h-3.5 text-amber-600" />
+                                <span>Xem lịch sử chức vụ</span>
                               </button>
 
                               <div className="h-px bg-slate-100 my-1" />
@@ -947,6 +1050,12 @@ export const UserList: React.FC = () => {
                           {u.teamName || (u.teamId ? teams.find((t) => t.id === u.teamId)?.name : 'Chưa phân nhóm')}
                         </span>
                       </div>
+                      {u.department && (
+                        <div className="flex items-center gap-2 text-slate-500 text-[11px]">
+                          <span className="text-slate-400 font-medium">Phòng/Ban:</span>
+                          <span className="font-semibold text-slate-700">{u.department}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -959,27 +1068,43 @@ export const UserList: React.FC = () => {
                     </div>
 
                     {isAdmin && (
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1">
                         <button
                           type="button"
-                          onClick={() => handleOpenUserModal(u)}
-                          className="p-1.5 text-slate-500 hover:text-[#001f3f] hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-                          title="Sửa thông tin"
+                          onClick={() => setEditingProfileUser(u)}
+                          className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
+                          title="Chỉnh sửa hồ sơ"
                         >
                           <Edit className="w-3.5 h-3.5" />
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleOpenRoleChange(u)}
+                          onClick={() => setChangingRoleUser(u)}
                           className="p-1.5 text-slate-500 hover:text-[#b38e22] hover:bg-amber-50 rounded-lg transition-colors cursor-pointer"
-                          title="Phân quyền"
+                          title="Luân chuyển chức vụ"
                         >
                           <Shield className="w-3.5 h-3.5" />
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleOpenTempPassModal(u)}
+                          onClick={() => setSettingPermissionsUser(u)}
+                          className="p-1.5 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                          title="Phân quyền riêng"
+                        >
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setViewingHistoryUser(u)}
                           className="p-1.5 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer"
+                          title="Lịch sử chức vụ"
+                        >
+                          <History className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenTempPassModal(u)}
+                          className="p-1.5 text-slate-500 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-colors cursor-pointer"
                           title="Cấp mật khẩu tạm"
                         >
                           <KeyRound className="w-3.5 h-3.5" />
@@ -1778,6 +1903,76 @@ export const UserList: React.FC = () => {
             </form>
           </div>
         </div>
+      )}
+
+      {/* 9. HR Module: Edit Profile Modal */}
+      {editingProfileUser && (
+        <EditProfileModal
+          user={editingProfileUser}
+          teams={teams}
+          customRoles={customRoles}
+          onClose={() => setEditingProfileUser(null)}
+          onSuccess={() => {
+            setEditingProfileUser(null);
+          }}
+        />
+      )}
+
+      {/* 10. HR Module: Change Role / Rotation Modal */}
+      {changingRoleUser && (
+        <ChangeRoleModal
+          user={changingRoleUser}
+          customRoles={customRoles}
+          onClose={() => setChangingRoleUser(null)}
+          onSuccess={() => {
+            setChangingRoleUser(null);
+          }}
+        />
+      )}
+
+      {/* 11. HR Module: Granular Custom Permissions Modal */}
+      {settingPermissionsUser && (
+        <PermissionsModal
+          user={settingPermissionsUser}
+          customRoles={customRoles}
+          onClose={() => setSettingPermissionsUser(null)}
+          onSuccess={() => {
+            setSettingPermissionsUser(null);
+          }}
+        />
+      )}
+
+      {/* 12. HR Module: Transfer Team Modal */}
+      {transferringTeamUser && (
+        <TransferTeamModal
+          user={transferringTeamUser}
+          teams={teams}
+          users={users}
+          onClose={() => setTransferringTeamUser(null)}
+          onSuccess={() => {
+            setTransferringTeamUser(null);
+          }}
+        />
+      )}
+
+      {/* 13. HR Module: Role Change History Audit Trail Modal */}
+      {viewingHistoryUser && (
+        <RoleHistoryModal
+          user={viewingHistoryUser}
+          onClose={() => setViewingHistoryUser(null)}
+        />
+      )}
+
+      {/* 14. HR Module: Role & Permission Master Definition Modal */}
+      {showRoleManagementModal && (
+        <RoleManagementModal
+          roles={customRoles}
+          users={users}
+          onClose={() => setShowRoleManagementModal(false)}
+          onRolesUpdated={(updatedRoles) => {
+            setCustomRoles(updatedRoles);
+          }}
+        />
       )}
 
       {/* 8. Admin Re-authentication Verification Modal */}

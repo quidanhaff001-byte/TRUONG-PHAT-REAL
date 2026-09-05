@@ -178,7 +178,7 @@ async function recordAuditLog(
   action: string,
   module: string,
   details: string,
-  target?: { userId?: string; userName?: string; recordId?: string },
+  target?: { userId?: string; userName?: string; recordId?: string; recordName?: string },
   beforeData?: any,
   afterData?: any,
   ipAddress?: string,
@@ -203,6 +203,7 @@ async function recordAuditLog(
       targetUserId: target?.userId || '',
       targetUserName: target?.userName || '',
       recordId: target?.recordId || target?.userId || '',
+      recordName: target?.recordName || '',
       beforeData: beforeData ? sanitizeForLog(beforeData) : null,
       afterData: afterData ? sanitizeForLog(afterData) : null,
       ipAddress: ipAddress || '127.0.0.1',
@@ -907,7 +908,29 @@ app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRe
 
 // 2. adminUpdateUser handler (Supports both PATCH and POST /api/admin/update-user)
 const handleAdminUpdateUser = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-  const { uid, displayName, fullName, email, phone, employeeCode, role, status, teamId, teamName, notes, avatarUrl } = req.body;
+  const {
+    uid,
+    displayName,
+    fullName,
+    email,
+    phone,
+    employeeCode,
+    role,
+    roleName,
+    status,
+    workStatus,
+    dateOfBirth,
+    address,
+    department,
+    teamId,
+    teamName,
+    directManagerId,
+    directManagerName,
+    notes,
+    avatarUrl,
+    customPermissions,
+    roleHistory,
+  } = req.body;
   const ip = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '';
   const userAgent = req.headers['user-agent'] || '';
 
@@ -916,6 +939,16 @@ const handleAdminUpdateUser = async (req: AuthenticatedRequest, res: Response): 
       success: false,
       errorCode: 'MISSING_UID',
       message: 'Thiếu mã định danh tài khoản (UID).',
+    });
+    return;
+  }
+
+  // Protection: prevent locking or making the last active admin resigned
+  if ((status === 'LOCKED' || workStatus === 'RESIGNED') && (await isLastAdmin(uid))) {
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'LAST_ADMIN_PROTECTED',
+      message: 'Không thể khóa hoặc cho nghỉ việc Quản trị viên cuối cùng của hệ thống.',
     });
     return;
   }
@@ -1036,11 +1069,20 @@ const handleAdminUpdateUser = async (req: AuthenticatedRequest, res: Response): 
     if (phone !== undefined) updatePayload.phone = phone.trim();
     if (employeeCode !== undefined) updatePayload.employeeCode = employeeCode.trim().toUpperCase();
     if (role !== undefined) updatePayload.role = role;
+    if (roleName !== undefined) updatePayload.roleName = roleName;
     if (status !== undefined) updatePayload.status = status;
+    if (workStatus !== undefined) updatePayload.workStatus = workStatus;
+    if (dateOfBirth !== undefined) updatePayload.dateOfBirth = dateOfBirth;
+    if (address !== undefined) updatePayload.address = address;
+    if (department !== undefined) updatePayload.department = department;
     if (teamId !== undefined) updatePayload.teamId = teamId || null;
     if (teamName !== undefined) updatePayload.teamName = teamName || '';
+    if (directManagerId !== undefined) updatePayload.directManagerId = directManagerId || null;
+    if (directManagerName !== undefined) updatePayload.directManagerName = directManagerName || '';
     if (notes !== undefined) updatePayload.notes = notes;
     if (avatarUrl !== undefined) updatePayload.avatarUrl = avatarUrl;
+    if (customPermissions !== undefined) updatePayload.customPermissions = customPermissions;
+    if (roleHistory !== undefined) updatePayload.roleHistory = roleHistory;
 
     const sanitizedPayload = sanitizeFirestoreData(updatePayload);
     await userDocRef.update(sanitizedPayload);
@@ -1260,9 +1302,9 @@ app.post('/api/admin/resolve-orphan-user', requireAdminAuth, async (req: Authent
   }
 });
 
-// 3. adminSetUserRole
-app.post('/api/admin/set-user-role', requireAdminAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-  const { uid, newRole } = req.body;
+// 3. adminSetUserRole & changeUserRole
+const handleAdminSetUserRole = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const { uid, newRole, newRoleName, reason } = req.body;
   const ip = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '';
   const userAgent = req.headers['user-agent'] || '';
 
@@ -1275,12 +1317,12 @@ app.post('/api/admin/set-user-role', requireAdminAuth, async (req: Authenticated
     return;
   }
 
-  const validRoles = ['ADMIN', 'TEAM_LEADER', 'AGENT'];
-  if (!validRoles.includes(newRole)) {
+  const cleanRole = String(newRole).trim().toUpperCase();
+  if (!cleanRole || cleanRole.length < 2) {
     sendApiResponse(res, 400, {
       success: false,
       errorCode: 'INVALID_ROLE',
-      message: 'Vai trò người dùng không hợp lệ.',
+      message: 'Mã chức vụ mới không hợp lệ.',
     });
     return;
   }
@@ -1307,10 +1349,12 @@ app.post('/api/admin/set-user-role', requireAdminAuth, async (req: Authenticated
     }
 
     const userData = userSnap.data()!;
-    const oldRole = userData.role;
+    const oldRole = userData.role || 'AGENT';
+    const oldRoleName = userData.roleName || oldRole;
+    const effectiveNewRoleName = newRoleName || cleanRole;
 
     // Protection: Prevent demoting the last Admin
-    if (oldRole === 'ADMIN' && newRole !== 'ADMIN') {
+    if (oldRole === 'ADMIN' && cleanRole !== 'ADMIN') {
       const isLast = await isLastAdmin(uid);
       if (isLast) {
         sendApiResponse(res, 400, {
@@ -1326,8 +1370,8 @@ app.post('/api/admin/set-user-role', requireAdminAuth, async (req: Authenticated
     if (adminAuth) {
       try {
         await adminAuth.setCustomUserClaims(uid, {
-          role: newRole,
-          admin: newRole === 'ADMIN',
+          role: cleanRole,
+          admin: cleanRole === 'ADMIN',
         });
         await adminAuth.revokeRefreshTokens(uid);
       } catch (authErr: any) {
@@ -1335,22 +1379,42 @@ app.post('/api/admin/set-user-role', requireAdminAuth, async (req: Authenticated
       }
     }
 
-    // Update role in Cloud Firestore
     const now = new Date().toISOString();
-    await userDocRef.update({
-      role: newRole,
-      updatedAt: now,
-      updatedBy: req.adminUser?.uid,
-    });
+    const historyEntry = {
+      fromRole: oldRole,
+      fromRoleName: oldRoleName,
+      toRole: cleanRole,
+      toRoleName: effectiveNewRoleName,
+      changedAt: now,
+      changedBy: req.adminUser?.uid || 'ADMIN',
+      changedByName: req.adminUser?.name || 'Quản trị viên',
+      reason: reason || 'Luân chuyển chức vụ theo quyết định quản trị',
+    };
+
+    const existingHistory = Array.isArray(userData.roleHistory) ? userData.roleHistory : [];
+    const updatedHistory = [...existingHistory, historyEntry];
+
+    // Update role and roleHistory in Cloud Firestore
+    await userDocRef.update(
+      sanitizeFirestoreData({
+        role: cleanRole,
+        roleName: effectiveNewRoleName,
+        roleHistory: updatedHistory,
+        updatedAt: now,
+        updatedBy: req.adminUser?.uid,
+      })
+    );
+
+    const logDesc = `${req.adminUser?.name || 'Quản trị viên'} đổi chức vụ ${userData.fullName} từ ${oldRoleName} thành ${effectiveNewRoleName}.${reason ? ` Lý do: ${reason}` : ''}`;
 
     await recordAuditLog(
       req.adminUser!,
       'CHANGE_ROLE',
       'USERS',
-      `Thay đổi vai trò cho ${userData.fullName}: ${oldRole} -> ${newRole}`,
+      logDesc,
       { userId: uid, userName: userData.fullName, recordId: uid },
-      { role: oldRole },
-      { role: newRole },
+      { role: oldRole, roleName: oldRoleName },
+      { role: cleanRole, roleName: effectiveNewRoleName, reason },
       ip,
       userAgent,
       'SUCCESS'
@@ -1358,8 +1422,10 @@ app.post('/api/admin/set-user-role', requireAdminAuth, async (req: Authenticated
 
     sendApiResponse(res, 200, {
       success: true,
-      message: `Đã phân quyền thành công: ${userData.fullName} hiện là ${newRole}. Các phiên làm việc cũ đã được thu hồi để cập nhật quyền ngay.`,
-      role: newRole,
+      message: `Đã luân chuyển chức vụ thành công: ${userData.fullName} hiện là ${effectiveNewRoleName}.`,
+      role: cleanRole,
+      roleName: effectiveNewRoleName,
+      roleHistory: updatedHistory,
     });
   } catch (err: any) {
     console.error('[adminSetUserRole] Error:', err);
@@ -1367,6 +1433,497 @@ app.post('/api/admin/set-user-role', requireAdminAuth, async (req: Authenticated
       success: false,
       errorCode: 'SET_ROLE_FAILED',
       message: `Lỗi phân quyền: ${err.message || 'Lỗi không xác định'}`,
+    });
+  }
+};
+
+app.post('/api/admin/set-user-role', requireAdminAuth, handleAdminSetUserRole);
+app.post('/api/admin/change-user-role', requireAdminAuth, handleAdminSetUserRole);
+
+// 3b. Cập nhật phân quyền riêng cho từng nhân sự (Individual Custom Permissions)
+app.post('/api/admin/set-user-permissions', requireAdminAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const { uid, customPermissions } = req.body;
+  const ip = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '';
+  const userAgent = req.headers['user-agent'] || '';
+
+  if (!uid) {
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'MISSING_UID',
+      message: 'Thiếu UID người dùng.',
+    });
+    return;
+  }
+
+  if (!adminDb) {
+    sendApiResponse(res, 503, {
+      success: false,
+      errorCode: 'BACKEND_NOT_CONFIGURED',
+      message: 'Dịch vụ Firestore phía máy chủ chưa sẵn sàng.',
+    });
+    return;
+  }
+
+  try {
+    const userDocRef = adminDb.collection('users').doc(uid);
+    const userSnap = await userDocRef.get();
+    if (!userSnap.exists) {
+      sendApiResponse(res, 404, {
+        success: false,
+        errorCode: 'USER_NOT_FOUND',
+        message: 'Không tìm thấy hồ sơ người dùng.',
+      });
+      return;
+    }
+
+    const userData = userSnap.data()!;
+    const now = new Date().toISOString();
+    const cleanPermissions = customPermissions && typeof customPermissions === 'object' ? customPermissions : {};
+
+    await userDocRef.update(
+      sanitizeFirestoreData({
+        customPermissions: cleanPermissions,
+        updatedAt: now,
+        updatedBy: req.adminUser?.uid,
+      })
+    );
+
+    await recordAuditLog(
+      req.adminUser!,
+      'SET_PERMISSIONS',
+      'USERS',
+      `Điều chỉnh phân quyền riêng cho nhân sự: ${userData.fullName} (${userData.employeeCode || uid})`,
+      { userId: uid, userName: userData.fullName, recordId: uid },
+      { customPermissions: userData.customPermissions || {} },
+      { customPermissions: cleanPermissions },
+      ip,
+      userAgent,
+      'SUCCESS'
+    );
+
+    sendApiResponse(res, 200, {
+      success: true,
+      message: `Đã cập nhật phân quyền riêng cho ${userData.fullName} thành công.`,
+      customPermissions: cleanPermissions,
+    });
+  } catch (err: any) {
+    console.error('[setUserPermissions] Error:', err);
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'SET_PERMISSIONS_FAILED',
+      message: `Lỗi cập nhật phân quyền: ${err.message || 'Lỗi không xác định'}`,
+    });
+  }
+});
+
+// 3c. Điều chuyển phòng ban, đội nhóm và chuyển giao khách hàng
+app.post('/api/admin/transfer-user-team', requireAdminAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const {
+    uid,
+    newTeamId,
+    newTeamName,
+    newDepartment,
+    newLeaderId,
+    newLeaderName,
+    customerTransferMode,
+    targetUserId,
+    targetUserName,
+    selectedCustomerIds,
+  } = req.body;
+  const ip = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '';
+  const userAgent = req.headers['user-agent'] || '';
+
+  if (!uid) {
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'MISSING_UID',
+      message: 'Thiếu UID người dùng cần chuyển nhóm.',
+    });
+    return;
+  }
+
+  if (!adminDb) {
+    sendApiResponse(res, 503, {
+      success: false,
+      errorCode: 'BACKEND_NOT_CONFIGURED',
+      message: 'Dịch vụ Firestore phía máy chủ chưa sẵn sàng.',
+    });
+    return;
+  }
+
+  try {
+    const userDocRef = adminDb.collection('users').doc(uid);
+    const userSnap = await userDocRef.get();
+    if (!userSnap.exists) {
+      sendApiResponse(res, 404, {
+        success: false,
+        errorCode: 'USER_NOT_FOUND',
+        message: 'Không tìm thấy hồ sơ người dùng.',
+      });
+      return;
+    }
+
+    const userData = userSnap.data()!;
+    const now = new Date().toISOString();
+
+    const updatePayload: Record<string, any> = {
+      teamId: newTeamId || null,
+      teamName: newTeamName || '',
+      updatedAt: now,
+      updatedBy: req.adminUser?.uid,
+    };
+
+    if (newDepartment !== undefined) updatePayload.department = newDepartment;
+    if (newLeaderId !== undefined) updatePayload.directManagerId = newLeaderId || null;
+    if (newLeaderName !== undefined) updatePayload.directManagerName = newLeaderName || '';
+
+    await userDocRef.update(sanitizeFirestoreData(updatePayload));
+
+    let reassignCount = 0;
+    if (customerTransferMode === 'ALL' && targetUserId) {
+      const customersSnap = await adminDb
+        .collection('customers')
+        .where('assignedTo', '==', uid)
+        .get();
+
+      const batch = adminDb.batch();
+      customersSnap.docs.forEach((docSnap) => {
+        batch.update(docSnap.ref, {
+          assignedTo: targetUserId,
+          assignedToName: targetUserName || '',
+          assignedAgentId: targetUserId,
+          assignedAgentName: targetUserName || '',
+          updatedAt: now,
+          updatedBy: req.adminUser?.uid,
+        });
+        reassignCount++;
+      });
+
+      if (reassignCount > 0) {
+        await batch.commit();
+      }
+    } else if (
+      customerTransferMode === 'SELECTED' &&
+      targetUserId &&
+      Array.isArray(selectedCustomerIds) &&
+      selectedCustomerIds.length > 0
+    ) {
+      const batch = adminDb.batch();
+      for (const cId of selectedCustomerIds) {
+        const cRef = adminDb.collection('customers').doc(cId);
+        batch.update(cRef, {
+          assignedTo: targetUserId,
+          assignedToName: targetUserName || '',
+          assignedAgentId: targetUserId,
+          assignedAgentName: targetUserName || '',
+          updatedAt: now,
+          updatedBy: req.adminUser?.uid,
+        });
+        reassignCount++;
+      }
+      if (reassignCount > 0) {
+        await batch.commit();
+      }
+    }
+
+    const logDesc = `${req.adminUser?.name || 'Quản trị viên'} điều chuyển nhân sự ${userData.fullName} sang ${newTeamName || 'Chưa phân nhóm'}${newDepartment ? ` (${newDepartment})` : ''}.${reassignCount > 0 ? ` Đã bàn giao ${reassignCount} khách hàng cho ${targetUserName}.` : ' Giữ nguyên khách hàng phụ trách.'}`;
+
+    await recordAuditLog(
+      req.adminUser!,
+      'TRANSFER_TEAM',
+      'USERS',
+      logDesc,
+      { userId: uid, userName: userData.fullName, recordId: uid },
+      { teamId: userData.teamId, teamName: userData.teamName, department: userData.department },
+      { teamId: newTeamId, teamName: newTeamName, department: newDepartment, reassignCount, targetUserId },
+      ip,
+      userAgent,
+      'SUCCESS'
+    );
+
+    sendApiResponse(res, 200, {
+      success: true,
+      message: `Điều chuyển nhân sự ${userData.fullName} thành công.${reassignCount > 0 ? ` Đã chuyển giao ${reassignCount} khách hàng cho ${targetUserName}.` : ''}`,
+      reassignCount,
+    });
+  } catch (err: any) {
+    console.error('[transferUserTeam] Error:', err);
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'TRANSFER_TEAM_FAILED',
+      message: `Lỗi điều chuyển: ${err.message || 'Lỗi không xác định'}`,
+    });
+  }
+});
+
+// 3d. Dynamic Roles Management (Quản lý chức vụ & phân quyền động)
+app.get('/api/admin/roles', requireAdminAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  if (!adminDb) {
+    sendApiResponse(res, 503, {
+      success: false,
+      errorCode: 'BACKEND_NOT_CONFIGURED',
+      message: 'Dịch vụ Firestore chưa sẵn sàng.',
+    });
+    return;
+  }
+
+  try {
+    const rolesSnap = await adminDb.collection('roles').get();
+    const roles = rolesSnap.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    sendApiResponse(res, 200, {
+      success: true,
+      message: 'Lấy danh sách chức vụ thành công',
+      roles,
+    });
+  } catch (err: any) {
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'FETCH_ROLES_FAILED',
+      message: `Lỗi lấy danh sách chức vụ: ${err.message}`,
+    });
+  }
+});
+
+app.post('/api/admin/roles', requireAdminAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const { code, name, description, permissions, isActive } = req.body;
+  const ip = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '';
+  const userAgent = req.headers['user-agent'] || '';
+
+  if (!code || !name) {
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'INVALID_INPUT',
+      message: 'Vui lòng nhập đầy đủ mã chức vụ và tên chức vụ.',
+    });
+    return;
+  }
+
+  const cleanCode = code.trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_');
+  const cleanName = name.trim();
+
+  if (!adminDb) {
+    sendApiResponse(res, 503, {
+      success: false,
+      errorCode: 'BACKEND_NOT_CONFIGURED',
+      message: 'Dịch vụ Firestore chưa sẵn sàng.',
+    });
+    return;
+  }
+
+  try {
+    const existingSnap = await adminDb.collection('roles').where('code', '==', cleanCode).limit(1).get();
+    if (!existingSnap.empty) {
+      sendApiResponse(res, 400, {
+        success: false,
+        errorCode: 'ROLE_CODE_EXISTS',
+        message: `Mã chức vụ "${cleanCode}" đã tồn tại trên hệ thống.`,
+      });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const roleId = `role_${cleanCode.toLowerCase()}`;
+    const newRoleData = {
+      id: roleId,
+      code: cleanCode,
+      name: cleanName,
+      description: description?.trim() || '',
+      permissions: Array.isArray(permissions) ? permissions : [],
+      isActive: isActive !== false,
+      isSystem: false,
+      createdAt: now,
+      createdBy: req.adminUser?.uid || 'ADMIN',
+      updatedAt: now,
+      updatedBy: req.adminUser?.uid || 'ADMIN',
+    };
+
+    await adminDb.collection('roles').doc(roleId).set(sanitizeFirestoreData(newRoleData));
+
+    await recordAuditLog(
+      req.adminUser!,
+      'CREATE_ROLE',
+      'USERS',
+      `Tạo chức vụ mới: ${cleanName} (${cleanCode}) với ${newRoleData.permissions.length} quyền hạn`,
+      { recordId: roleId, recordName: cleanName },
+      null,
+      newRoleData,
+      ip,
+      userAgent,
+      'SUCCESS'
+    );
+
+    sendApiResponse(res, 201, {
+      success: true,
+      message: `Đã tạo chức vụ "${cleanName}" thành công.`,
+      role: newRoleData,
+    });
+  } catch (err: any) {
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'CREATE_ROLE_FAILED',
+      message: `Lỗi tạo chức vụ: ${err.message}`,
+    });
+  }
+});
+
+app.put('/api/admin/roles/:id', requireAdminAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const roleId = req.params.id;
+  const { name, description, permissions, isActive } = req.body;
+  const ip = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '';
+  const userAgent = req.headers['user-agent'] || '';
+
+  if (!adminDb) {
+    sendApiResponse(res, 503, {
+      success: false,
+      errorCode: 'BACKEND_NOT_CONFIGURED',
+      message: 'Dịch vụ Firestore chưa sẵn sàng.',
+    });
+    return;
+  }
+
+  try {
+    const roleRef = adminDb.collection('roles').doc(roleId);
+    const roleSnap = await roleRef.get();
+    if (!roleSnap.exists) {
+      sendApiResponse(res, 404, {
+        success: false,
+        errorCode: 'ROLE_NOT_FOUND',
+        message: 'Không tìm thấy chức vụ cần cập nhật.',
+      });
+      return;
+    }
+
+    const beforeData = roleSnap.data()!;
+
+    if (beforeData.code === 'ADMIN' && isActive === false) {
+      sendApiResponse(res, 400, {
+        success: false,
+        errorCode: 'CANNOT_DEACTIVATE_ADMIN',
+        message: 'Không thể ngưng hoạt động chức vụ Quản trị viên tối cao (ADMIN).',
+      });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const updateData: Record<string, any> = {
+      updatedAt: now,
+      updatedBy: req.adminUser?.uid || 'ADMIN',
+    };
+
+    if (name !== undefined) updateData.name = name.trim();
+    if (description !== undefined) updateData.description = description.trim();
+    if (permissions !== undefined && Array.isArray(permissions)) updateData.permissions = permissions;
+    if (isActive !== undefined) updateData.isActive = Boolean(isActive);
+
+    await roleRef.update(sanitizeFirestoreData(updateData));
+    const afterData = { ...beforeData, ...updateData };
+
+    await recordAuditLog(
+      req.adminUser!,
+      'UPDATE_ROLE',
+      'USERS',
+      `Cập nhật chức vụ: ${afterData.name} (${beforeData.code})`,
+      { recordId: roleId, recordName: afterData.name },
+      beforeData,
+      afterData,
+      ip,
+      userAgent,
+      'SUCCESS'
+    );
+
+    sendApiResponse(res, 200, {
+      success: true,
+      message: `Cập nhật chức vụ "${afterData.name}" thành công.`,
+      role: afterData,
+    });
+  } catch (err: any) {
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'UPDATE_ROLE_FAILED',
+      message: `Lỗi cập nhật chức vụ: ${err.message}`,
+    });
+  }
+});
+
+app.delete('/api/admin/roles/:id', requireAdminAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const roleId = req.params.id;
+  const ip = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '';
+  const userAgent = req.headers['user-agent'] || '';
+
+  if (!adminDb) {
+    sendApiResponse(res, 503, {
+      success: false,
+      errorCode: 'BACKEND_NOT_CONFIGURED',
+      message: 'Dịch vụ Firestore chưa sẵn sàng.',
+    });
+    return;
+  }
+
+  try {
+    const roleRef = adminDb.collection('roles').doc(roleId);
+    const roleSnap = await roleRef.get();
+    if (!roleSnap.exists) {
+      sendApiResponse(res, 404, {
+        success: false,
+        errorCode: 'ROLE_NOT_FOUND',
+        message: 'Không tìm thấy chức vụ cần xóa.',
+      });
+      return;
+    }
+
+    const roleData = roleSnap.data()!;
+
+    if (roleData.isSystem || roleData.code === 'ADMIN') {
+      sendApiResponse(res, 400, {
+        success: false,
+        errorCode: 'SYSTEM_ROLE_PROTECTED',
+        message: 'Chức vụ mặc định hệ thống không thể xóa.',
+      });
+      return;
+    }
+
+    const usersWithRole = await adminDb
+      .collection('users')
+      .where('role', 'in', [roleData.code, roleId])
+      .get();
+
+    if (!usersWithRole.empty) {
+      sendApiResponse(res, 400, {
+        success: false,
+        errorCode: 'ROLE_IN_USE',
+        message: `Không thể xóa chức vụ "${roleData.name}" vì đang có ${usersWithRole.size} nhân sự giữ chức vụ này. Vui lòng luân chuyển chức vụ của các nhân sự trước khi xóa.`,
+      });
+      return;
+    }
+
+    await roleRef.delete();
+
+    await recordAuditLog(
+      req.adminUser!,
+      'DELETE_ROLE',
+      'USERS',
+      `Xóa chức vụ: ${roleData.name} (${roleData.code})`,
+      { recordId: roleId, recordName: roleData.name },
+      roleData,
+      null,
+      ip,
+      userAgent,
+      'SUCCESS'
+    );
+
+    sendApiResponse(res, 200, {
+      success: true,
+      message: `Đã xóa chức vụ "${roleData.name}" thành công.`,
+    });
+  } catch (err: any) {
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'DELETE_ROLE_FAILED',
+      message: `Lỗi xóa chức vụ: ${err.message}`,
     });
   }
 });

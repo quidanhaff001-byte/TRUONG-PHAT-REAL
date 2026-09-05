@@ -1,5 +1,33 @@
-export type UserRole = 'ADMIN' | 'TEAM_LEADER' | 'AGENT';
+export type StandardRole = 'ADMIN' | 'TEAM_LEADER' | 'AGENT';
+export type UserRole = StandardRole | string;
 export type UserStatus = 'ACTIVE' | 'LOCKED' | 'PENDING';
+export type WorkStatus = 'ACTIVE' | 'ON_LEAVE' | 'RESIGNED';
+
+export interface RoleHistoryEntry {
+  fromRole: string;
+  fromRoleName?: string;
+  toRole: string;
+  toRoleName?: string;
+  changedAt: string;
+  changedBy: string;
+  changedByName?: string;
+  reason?: string;
+}
+
+export interface CustomRole {
+  id: string;
+  code: string;
+  name: string;
+  description?: string;
+  isSystem?: boolean;
+  isActive: boolean;
+  permissions: string[];
+  userCount?: number;
+  createdAt: string;
+  createdBy?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}
 
 export interface User {
   id: string;
@@ -10,14 +38,21 @@ export interface User {
   phone: string;
   avatarUrl?: string;
   role: UserRole;
+  roleName?: string;
   teamId?: string | null;
   teamName?: string;
+  department?: string;
   directManagerId?: string;
   directManagerName?: string;
+  dateOfBirth?: string;
+  address?: string;
   status: UserStatus;
+  workStatus?: WorkStatus;
   mustChangePassword?: boolean;
   startDate?: string;
   notes?: string;
+  customPermissions?: Record<string, boolean>;
+  roleHistory?: RoleHistoryEntry[];
   createdAt: string;
   createdBy?: string;
   updatedAt?: string;
