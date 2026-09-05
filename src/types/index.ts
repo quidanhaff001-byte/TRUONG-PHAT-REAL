@@ -862,6 +862,7 @@ export interface AuditLog {
     | 'UPDATE_USER'
     | 'DELETE'
     | 'DELETE_USER'
+    | 'DELETE_COMMISSION'
     | 'DELETE_ORPHAN_COMMISSION'
     | 'RESTORE'
     | 'LOGIN'

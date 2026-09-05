@@ -1675,25 +1675,64 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const updateTransaction = async (id: string, data: Partial<Transaction>): Promise<void> => {
     const now = new Date().toISOString();
     const oldTrans = transactions.find((t) => t.id === id);
+    if (!oldTrans) return;
 
-    setTransactions((prev) => prev.map((t) => (t.id === id ? { ...t, ...data, updatedAt: now } : t)));
+    const sanitizedData = cleanUndefined({ ...data, updatedAt: now });
+
     if (isFirebaseConfigured) {
       try {
-        await updateDoc(doc(db, 'transactions', id), { ...data, updatedAt: now });
-      } catch (err) {
-        console.error(err);
+        const batch = writeBatch(db);
+        batch.update(doc(db, 'transactions', id), sanitizedData);
+
+        if (sanitizedData.status && sanitizedData.status !== oldTrans.status) {
+          if (sanitizedData.status === 'Đã đặt cọc' && oldTrans.propertyId) {
+            batch.update(doc(db, 'properties', oldTrans.propertyId), { status: 'Đã nhận cọc', updatedAt: now });
+          } else if (sanitizedData.status === 'Hoàn tất' && oldTrans.propertyId) {
+            batch.update(doc(db, 'properties', oldTrans.propertyId), {
+              status: oldTrans.type === 'SALE' ? 'Đã bán' : 'Đã sang nhượng',
+              updatedAt: now,
+            });
+          } else if ((sanitizedData.status === 'Hủy cọc' || sanitizedData.status === 'Giao dịch thất bại') && oldTrans.propertyId) {
+            batch.update(doc(db, 'properties', oldTrans.propertyId), { status: 'Đang bán', updatedAt: now });
+            // Cancel linked commissions
+            const linkedComms = commissions.filter((c) => c.dealId === id);
+            for (const c of linkedComms) {
+              batch.update(doc(db, 'commissions', c.id), { status: 'Đã hủy', updatedAt: now });
+            }
+          }
+        }
+
+        await batch.commit();
+      } catch (err: any) {
+        console.error('[updateTransaction] Error:', err);
+        throw new Error(`Lỗi cập nhật giao dịch: ${err.message || 'Lỗi kết nối'}`);
       }
     }
 
-    if (data.status && oldTrans && data.status !== oldTrans.status) {
-      if (data.status === 'Đã đặt cọc') {
-        await updatePropertyStatus(oldTrans.propertyId, 'Đã nhận cọc');
-      } else if (data.status === 'Hoàn tất') {
-        await updatePropertyStatus(oldTrans.propertyId, oldTrans.type === 'SALE' ? 'Đã bán' : 'Đã sang nhượng');
-      } else if (data.status === 'Hủy cọc' || data.status === 'Giao dịch thất bại') {
-        await updatePropertyStatus(oldTrans.propertyId, 'Đang bán');
+    setTransactions((prev) => prev.map((t) => (t.id === id ? { ...t, ...sanitizedData } : t)));
+
+    if (sanitizedData.status && sanitizedData.status !== oldTrans.status) {
+      if (sanitizedData.status === 'Đã đặt cọc' && oldTrans.propertyId) {
+        setProperties((prev) => prev.map((p) => (p.id === oldTrans.propertyId ? { ...p, status: 'Đã nhận cọc', updatedAt: now } : p)));
+      } else if (sanitizedData.status === 'Hoàn tất' && oldTrans.propertyId) {
+        const pStatus = oldTrans.type === 'SALE' ? 'Đã bán' : 'Đã sang nhượng';
+        setProperties((prev) => prev.map((p) => (p.id === oldTrans.propertyId ? { ...p, status: pStatus, updatedAt: now } : p)));
+      } else if ((sanitizedData.status === 'Hủy cọc' || sanitizedData.status === 'Giao dịch thất bại') && oldTrans.propertyId) {
+        setProperties((prev) => prev.map((p) => (p.id === oldTrans.propertyId ? { ...p, status: 'Đang bán', updatedAt: now } : p)));
+        setCommissions((prev) => prev.map((c) => (c.dealId === id ? { ...c, status: 'Đã hủy', updatedAt: now } : c)));
       }
     }
+
+    await addAuditLog({
+      action: 'UPDATE',
+      module: 'TRANSACTIONS',
+      recordId: id,
+      recordCode: oldTrans.code,
+      recordName: oldTrans.propertyTitle,
+      description: `Cập nhật giao dịch [${oldTrans.code}] ${sanitizedData.status ? 'sang trạng thái ' + sanitizedData.status : ''}`,
+      newData: sanitizedData,
+      level: 'INFO',
+    });
 
     success('Đã cập nhật tiến độ giao dịch');
   };
@@ -1703,15 +1742,60 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const deleteTransaction = async (id: string, reason?: string): Promise<void> => {
-    setTransactions((prev) => prev.filter((t) => t.id !== id));
+    const targetTrans = transactions.find((t) => t.id === id);
+    if (!targetTrans) return;
+
+    const linkedComms = commissions.filter((c) => c.dealId === id);
+    const now = new Date().toISOString();
+
     if (isFirebaseConfigured) {
       try {
-        await deleteDoc(doc(db, 'transactions', id));
-      } catch (err) {
-        console.error(err);
+        const batch = writeBatch(db);
+        batch.delete(doc(db, 'transactions', id));
+
+        // Clean up linked commissions
+        for (const comm of linkedComms) {
+          batch.delete(doc(db, 'commissions', comm.id));
+        }
+
+        // Revert property status to available
+        if (targetTrans.propertyId) {
+          batch.update(doc(db, 'properties', targetTrans.propertyId), {
+            status: targetTrans.type === 'RENTAL' ? 'Đang cho thuê' : 'Đang bán',
+            updatedAt: now,
+          });
+        }
+
+        await batch.commit();
+      } catch (err: any) {
+        console.error('[deleteTransaction] Error:', err);
+        throw new Error(`Lỗi khi xóa giao dịch: ${err.message || 'Lỗi kết nối'}`);
       }
     }
-    info('Đã xóa giao dịch');
+
+    setTransactions((prev) => prev.filter((t) => t.id !== id));
+    if (linkedComms.length > 0) {
+      const commIds = new Set(linkedComms.map((c) => c.id));
+      setCommissions((prev) => prev.filter((c) => !commIds.has(c.id)));
+    }
+    if (targetTrans.propertyId) {
+      const revertStatus = targetTrans.type === 'RENTAL' ? 'Đang cho thuê' : 'Đang bán';
+      setProperties((prev) =>
+        prev.map((p) => (p.id === targetTrans.propertyId ? { ...p, status: revertStatus, updatedAt: now } : p))
+      );
+    }
+
+    await addAuditLog({
+      action: 'DELETE',
+      module: 'TRANSACTIONS',
+      recordId: id,
+      recordCode: targetTrans.code,
+      recordName: targetTrans.propertyTitle,
+      description: `Xóa giao dịch [${targetTrans.code}] ${targetTrans.propertyTitle}${reason ? ': ' + reason : ''} và dọn dẹp các hồ sơ hoa hồng liên kết`,
+      level: 'WARNING',
+    });
+
+    info('Đã xóa giao dịch và đồng bộ các dữ liệu liên quan');
   };
 
   // Rental Deal Actions (Cho thuê)
@@ -1808,27 +1892,39 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const newId = `contract_${Date.now()}`;
     const now = new Date().toISOString();
 
-    const newContract: RentalContract = {
+    const newContract: RentalContract = cleanUndefined({
       ...contractData,
       id: newId,
       code: newCode,
+      notes: contractData.notes || '',
       createdAt: now,
       updatedAt: now,
-      createdBy: currentUser?.id,
-    };
+      createdBy: currentUser?.id || null,
+    });
 
-    setRentalContracts((prev) => [newContract, ...prev]);
     if (isFirebaseConfigured) {
       try {
-        await setDoc(doc(db, 'rentalContracts', newId), newContract);
-      } catch (err) {
-        console.error(err);
+        const batch = writeBatch(db);
+        batch.set(doc(db, 'rentalContracts', newId), newContract);
+
+        if (newContract.status === 'Đang hiệu lực' && newContract.propertyId) {
+          batch.update(doc(db, 'properties', newContract.propertyId), {
+            status: 'Đã cho thuê',
+            updatedAt: now,
+          });
+        }
+        await batch.commit();
+      } catch (err: any) {
+        console.error('[addRentalContract] Firestore batch error:', err);
+        throw new Error(`Lỗi khi lưu hợp đồng thuê: ${err.message || 'Lỗi kết nối'}`);
       }
     }
 
-    // Auto update property status
-    if (newContract.status === 'Đang hiệu lực') {
-      await updatePropertyStatus(newContract.propertyId, 'Đã cho thuê');
+    setRentalContracts((prev) => [newContract, ...prev]);
+    if (newContract.status === 'Đang hiệu lực' && newContract.propertyId) {
+      setProperties((prev) =>
+        prev.map((p) => (p.id === newContract.propertyId ? { ...p, status: 'Đã cho thuê', updatedAt: now } : p))
+      );
     }
 
     await addAuditLog({
@@ -1838,6 +1934,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       recordCode: newCode,
       recordName: newContract.propertyTitle,
       description: `Tạo hợp đồng thuê mới [${newCode}] cho khách ${newContract.customerName}`,
+      newData: newContract,
       level: 'INFO',
     });
 
@@ -1847,14 +1944,18 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const updateRentalContract = async (id: string, data: Partial<RentalContract>): Promise<void> => {
     const now = new Date().toISOString();
-    setRentalContracts((prev) => prev.map((c) => (c.id === id ? { ...c, ...data, updatedAt: now } : c)));
+    const cleanData = cleanUndefined({ ...data, updatedAt: now });
+
     if (isFirebaseConfigured) {
       try {
-        await updateDoc(doc(db, 'rentalContracts', id), { ...data, updatedAt: now });
-      } catch (err) {
-        console.error(err);
+        await updateDoc(doc(db, 'rentalContracts', id), cleanData);
+      } catch (err: any) {
+        console.error('[updateRentalContract] Error:', err);
+        throw new Error(`Lỗi cập nhật hợp đồng: ${err.message || 'Lỗi kết nối'}`);
       }
     }
+
+    setRentalContracts((prev) => prev.map((c) => (c.id === id ? { ...c, ...cleanData } : c)));
     success('Đã cập nhật hợp đồng thuê');
   };
 
@@ -1881,66 +1982,129 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const terminateRentalContract = async (id: string, terminationDate: string, reason?: string): Promise<void> => {
     const contract = rentalContracts.find((c) => c.id === id);
     if (!contract) return;
-    await updateRentalContract(id, {
-      status: 'Đã thanh lý',
+    const now = new Date().toISOString();
+    const updateData = {
+      status: 'Đã thanh lý' as const,
       notes: `Thanh lý ngày ${terminationDate}: ${reason || 'Kết thúc thời hạn thuê'}\n${contract.notes || ''}`,
-    });
-    // Return property to available status
-    await updatePropertyStatus(contract.propertyId, 'Đang cho thuê');
+      updatedAt: now,
+    };
+
+    if (isFirebaseConfigured) {
+      try {
+        const batch = writeBatch(db);
+        batch.update(doc(db, 'rentalContracts', id), updateData);
+        if (contract.propertyId) {
+          batch.update(doc(db, 'properties', contract.propertyId), {
+            status: 'Đang cho thuê',
+            updatedAt: now,
+          });
+        }
+        await batch.commit();
+      } catch (err: any) {
+        console.error('[terminateRentalContract] Error:', err);
+        throw new Error(`Lỗi thanh lý hợp đồng: ${err.message || 'Lỗi kết nối'}`);
+      }
+    }
+
+    setRentalContracts((prev) => prev.map((c) => (c.id === id ? { ...c, ...updateData } : c)));
+    if (contract.propertyId) {
+      setProperties((prev) =>
+        prev.map((p) => (p.id === contract.propertyId ? { ...p, status: 'Đang cho thuê', updatedAt: now } : p))
+      );
+    }
+
     await addAuditLog({
       action: 'UPDATE',
       module: 'CONTRACTS',
       recordId: id,
       recordCode: contract.code,
-      description: `Thanh lý hợp đồng thuê ${contract.code}`,
+      description: `Thanh lý hợp đồng thuê [${contract.code}], hoàn trả trạng thái nguồn hàng BĐS sang Đang cho thuê`,
       level: 'WARNING',
     });
-    info('Đã thanh lý hợp đồng thuê');
+
+    info('Đã thanh lý hợp đồng thuê và cập nhật nguồn hàng sang Đang cho thuê');
   };
 
   const deleteRentalContract = async (id: string, reason?: string): Promise<void> => {
-    setRentalContracts((prev) => prev.filter((c) => c.id !== id));
+    const target = rentalContracts.find((c) => c.id === id);
+    if (!target) return;
+    const now = new Date().toISOString();
+
     if (isFirebaseConfigured) {
       try {
-        await deleteDoc(doc(db, 'rentalContracts', id));
-      } catch (err) {
-        console.error(err);
+        const batch = writeBatch(db);
+        batch.delete(doc(db, 'rentalContracts', id));
+        if (target.propertyId && target.status === 'Đang hiệu lực') {
+          batch.update(doc(db, 'properties', target.propertyId), {
+            status: 'Đang cho thuê',
+            updatedAt: now,
+          });
+        }
+        await batch.commit();
+      } catch (err: any) {
+        console.error('[deleteRentalContract] Error:', err);
+        throw new Error(`Lỗi xóa hợp đồng: ${err.message || 'Lỗi kết nối'}`);
       }
     }
-    info('Đã xóa hợp đồng');
+
+    setRentalContracts((prev) => prev.filter((c) => c.id !== id));
+    if (target.propertyId && target.status === 'Đang hiệu lực') {
+      setProperties((prev) =>
+        prev.map((p) => (p.id === target.propertyId ? { ...p, status: 'Đang cho thuê', updatedAt: now } : p))
+      );
+    }
+
+    await addAuditLog({
+      action: 'DELETE',
+      module: 'CONTRACTS',
+      recordId: id,
+      recordCode: target.code,
+      recordName: target.propertyTitle,
+      description: `Xóa hợp đồng thuê [${target.code}]${reason ? ': ' + reason : ''}`,
+      level: 'WARNING',
+    });
+
+    info('Đã xóa hợp đồng thuê');
   };
 
   // Rental Payment Actions
   const addRentalPayment = async (paymentData: Omit<RentalPayment, 'id' | 'createdAt' | 'updatedAt'>): Promise<RentalPayment> => {
     const newId = `pay_${Date.now()}`;
     const now = new Date().toISOString();
-    const newPayment: RentalPayment = {
+    const newPayment: RentalPayment = cleanUndefined({
       ...paymentData,
       id: newId,
       createdAt: now,
       updatedAt: now,
-    };
-    setRentalPayments((prev) => [...prev, newPayment]);
+    });
+
     if (isFirebaseConfigured) {
       try {
         await setDoc(doc(db, 'rentalPayments', newId), newPayment);
-      } catch (err) {
-        console.error(err);
+      } catch (err: any) {
+        console.error('[addRentalPayment] Error:', err);
+        throw new Error(`Lỗi lưu kỳ thanh toán: ${err.message || 'Lỗi kết nối'}`);
       }
     }
+
+    setRentalPayments((prev) => [...prev, newPayment]);
     return newPayment;
   };
 
   const updateRentalPayment = async (id: string, data: Partial<RentalPayment>): Promise<void> => {
     const now = new Date().toISOString();
-    setRentalPayments((prev) => prev.map((p) => (p.id === id ? { ...p, ...data, updatedAt: now } : p)));
+    const cleanData = cleanUndefined({ ...data, updatedAt: now });
+
     if (isFirebaseConfigured) {
       try {
-        await updateDoc(doc(db, 'rentalPayments', id), { ...data, updatedAt: now });
-      } catch (err) {
-        console.error(err);
+        await updateDoc(doc(db, 'rentalPayments', id), cleanData);
+      } catch (err: any) {
+        console.error('[updateRentalPayment] Error:', err);
+        throw new Error(`Lỗi cập nhật kỳ thanh toán: ${err.message || 'Lỗi kết nối'}`);
       }
     }
+
+    setRentalPayments((prev) => prev.map((p) => (p.id === id ? { ...p, ...cleanData } : p)));
     success('Đã cập nhật kỳ thanh toán');
   };
 
@@ -1969,28 +2133,41 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Commission Actions (Hoa hồng)
   const addCommission = async (commData: Omit<Commission, 'id' | 'createdAt' | 'updatedAt'>): Promise<Commission> => {
+    // Strictly enforce requirement VII.3: "Không tạo hoa hồng độc lập nếu không gắn với giao dịch thật."
+    const hasValidDeal =
+      commData.dealId &&
+      (transactions.some((t) => t.id === commData.dealId) ||
+        rentalDeals.some((r) => r.id === commData.dealId) ||
+        rentalContracts.some((rc) => rc.id === commData.dealId));
+
+    if (!hasValidDeal) {
+      throw new Error('Hoa hồng bắt buộc phải gắn với một giao dịch mua bán hoặc hợp đồng thuê có thật trên hệ thống. Không cho phép tạo hoa hồng độc lập.');
+    }
+
     const sequence = commissions.length + 1;
     const newCode = `HH-AG${sequence.toString().padStart(4, '0')}`;
     const newId = `comm_${Date.now()}`;
     const now = new Date().toISOString();
 
-    const newComm: Commission = {
+    const newComm: Commission = cleanUndefined({
       ...commData,
       id: newId,
       code: newCode,
       createdAt: now,
       updatedAt: now,
-      createdBy: currentUser?.id,
-    };
+      createdBy: currentUser?.id || null,
+    });
 
-    setCommissions((prev) => [newComm, ...prev]);
     if (isFirebaseConfigured) {
       try {
         await setDoc(doc(db, 'commissions', newId), newComm);
-      } catch (err) {
-        console.error(err);
+      } catch (err: any) {
+        console.error('[addCommission] Firestore error:', err);
+        throw new Error(`Lỗi khi lưu hồ sơ hoa hồng: ${err.message || 'Lỗi kết nối'}`);
       }
     }
+
+    setCommissions((prev) => [newComm, ...prev]);
 
     await addAuditLog({
       action: 'CREATE_COMMISSION',
@@ -2008,14 +2185,18 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const updateCommission = async (id: string, data: Partial<Commission>): Promise<void> => {
     const now = new Date().toISOString();
-    setCommissions((prev) => prev.map((c) => (c.id === id ? { ...c, ...data, updatedAt: now } : c)));
+    const cleanData = cleanUndefined({ ...data, updatedAt: now });
+
     if (isFirebaseConfigured) {
       try {
-        await updateDoc(doc(db, 'commissions', id), { ...data, updatedAt: now });
-      } catch (err) {
-        console.error(err);
+        await updateDoc(doc(db, 'commissions', id), cleanData);
+      } catch (err: any) {
+        console.error('[updateCommission] Error:', err);
+        throw new Error(`Lỗi cập nhật hoa hồng: ${err.message || 'Lỗi kết nối'}`);
       }
     }
+
+    setCommissions((prev) => prev.map((c) => (c.id === id ? { ...c, ...cleanData } : c)));
     success('Đã cập nhật thông tin hoa hồng');
   };
 
@@ -2049,14 +2230,29 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const deleteCommission = async (id: string, reason?: string): Promise<void> => {
-    setCommissions((prev) => prev.filter((c) => c.id !== id));
+    const target = commissions.find((c) => c.id === id);
+    if (!target) return;
+
     if (isFirebaseConfigured) {
       try {
         await deleteDoc(doc(db, 'commissions', id));
-      } catch (err) {
-        console.error(err);
+      } catch (err: any) {
+        console.error('[deleteCommission] Error:', err);
+        throw new Error(`Lỗi khi xóa hồ sơ hoa hồng: ${err.message || 'Lỗi kết nối'}`);
       }
     }
+
+    setCommissions((prev) => prev.filter((c) => c.id !== id));
+
+    await addAuditLog({
+      action: 'DELETE_COMMISSION',
+      module: 'COMMISSIONS',
+      recordId: id,
+      recordCode: target.code,
+      description: `Xóa hồ sơ hoa hồng [${target.code}]${reason ? ': ' + reason : ''}`,
+      level: 'WARNING',
+    });
+
     info('Đã xóa hồ sơ hoa hồng');
   };
 

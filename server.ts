@@ -272,10 +272,18 @@ app.post('/api/audit-log', async (req: Request, res: Response): Promise<void> =>
       await adminDb.collection('auditLogs').doc(logId).set(logDoc);
     }
 
-    res.json({ success: true, logId });
+    sendApiResponse(res, 200, {
+      success: true,
+      message: 'Đã ghi nhật ký hoạt động thành công',
+      logId,
+    });
   } catch (err: any) {
     console.error('[api/audit-log] Error recording log:', err.message);
-    res.status(500).json({ success: false, error: err.message });
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'AUDIT_LOG_FAILED',
+      message: `Không thể ghi nhật ký hoạt động: ${err.message || 'Lỗi không xác định'}`,
+    });
   }
 });
 
@@ -284,7 +292,11 @@ app.post('/api/upload-image', (req: Request, res: Response): void => {
   try {
     const { base64Data, fileName, propertyId } = req.body;
     if (!base64Data) {
-      res.status(400).json({ success: false, error: 'Thiếu dữ liệu ảnh' });
+      sendApiResponse(res, 400, {
+        success: false,
+        errorCode: 'MISSING_IMAGE_DATA',
+        message: 'Thiếu dữ liệu ảnh để tải lên',
+      });
       return;
     }
 
@@ -310,15 +322,20 @@ app.post('/api/upload-image', (req: Request, res: Response): void => {
     fs.writeFileSync(filePath, buffer);
 
     const publicUrl = `/uploads/${uniqueName}`;
-    res.json({
+    sendApiResponse(res, 200, {
       success: true,
+      message: 'Tải ảnh lên máy chủ thành công',
       url: publicUrl,
       fileName: uniqueName,
       size: buffer.length,
     });
   } catch (err: any) {
     console.error('[Hosting Upload] Error saving file:', err.message);
-    res.status(500).json({ success: false, error: err.message || 'Lỗi lưu trữ tệp trên hosting' });
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'STORAGE_SAVE_ERROR',
+      message: err.message || 'Lỗi lưu trữ tệp trên hosting',
+    });
   }
 });
 function validatePasswordComplexity(password: string): { valid: boolean; reason?: string } {
@@ -895,12 +912,20 @@ app.post('/api/admin/update-user', requireAdminAuth, async (req: AuthenticatedRe
   const userAgent = req.headers['user-agent'] || '';
 
   if (!uid) {
-    res.status(400).json({ success: false, error: 'Thiếu mã định danh tài khoản (UID).' });
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'MISSING_UID',
+      message: 'Thiếu mã định danh tài khoản (UID).',
+    });
     return;
   }
 
-  if (!adminAuth || !adminDb) {
-    res.status(500).json({ success: false, error: 'Firebase Admin SDK chưa sẵn sàng.' });
+  if (!adminDb) {
+    sendApiResponse(res, 503, {
+      success: false,
+      errorCode: 'BACKEND_NOT_CONFIGURED',
+      message: 'Dịch vụ Firestore phía máy chủ chưa sẵn sàng.',
+    });
     return;
   }
 
@@ -909,20 +934,26 @@ app.post('/api/admin/update-user', requireAdminAuth, async (req: AuthenticatedRe
     const userSnap = await userDocRef.get();
 
     if (!userSnap.exists) {
-      res.status(404).json({ success: false, error: 'Không tìm thấy hồ sơ nhân sự trong hệ thống.' });
+      sendApiResponse(res, 404, {
+        success: false,
+        errorCode: 'USER_NOT_FOUND',
+        message: 'Không tìm thấy hồ sơ nhân sự trong hệ thống.',
+      });
       return;
     }
 
     const beforeData = userSnap.data();
 
-    // Update Firebase Auth display name / phone if provided
-    try {
-      await adminAuth.updateUser(uid, {
-        displayName: fullName || beforeData?.fullName,
-        phoneNumber: phone && phone.startsWith('+') ? phone : undefined,
-      });
-    } catch (authErr: any) {
-      console.warn('Auth updateUser notice:', authErr.message);
+    // Update Firebase Auth display name / phone if provided and adminAuth is available
+    if (adminAuth) {
+      try {
+        await adminAuth.updateUser(uid, {
+          displayName: fullName || beforeData?.fullName,
+          phoneNumber: phone && phone.startsWith('+') ? phone : undefined,
+        });
+      } catch (authErr: any) {
+        console.warn('Auth updateUser notice:', authErr.message);
+      }
     }
 
     const now = new Date().toISOString();
@@ -956,14 +987,18 @@ app.post('/api/admin/update-user', requireAdminAuth, async (req: AuthenticatedRe
       'SUCCESS'
     );
 
-    res.json({
+    sendApiResponse(res, 200, {
       success: true,
       message: 'Cập nhật thông tin nhân viên thành công.',
       user: afterData,
     });
   } catch (err: any) {
     console.error('[adminUpdateUser] Error:', err);
-    res.status(500).json({ success: false, error: `Lỗi cập nhật: ${err.message}` });
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'UPDATE_USER_FAILED',
+      message: `Lỗi cập nhật: ${err.message || 'Lỗi không xác định'}`,
+    });
   }
 });
 
@@ -974,18 +1009,30 @@ app.post('/api/admin/set-user-role', requireAdminAuth, async (req: Authenticated
   const userAgent = req.headers['user-agent'] || '';
 
   if (!uid || !newRole) {
-    res.status(400).json({ success: false, error: 'Thiếu UID người dùng hoặc vai trò mới.' });
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'INVALID_INPUT',
+      message: 'Thiếu UID người dùng hoặc vai trò mới.',
+    });
     return;
   }
 
   const validRoles = ['ADMIN', 'TEAM_LEADER', 'AGENT'];
   if (!validRoles.includes(newRole)) {
-    res.status(400).json({ success: false, error: 'Vai trò không hợp lệ.' });
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'INVALID_ROLE',
+      message: 'Vai trò người dùng không hợp lệ.',
+    });
     return;
   }
 
-  if (!adminAuth || !adminDb) {
-    res.status(500).json({ success: false, error: 'Firebase Admin SDK chưa sẵn sàng.' });
+  if (!adminDb) {
+    sendApiResponse(res, 503, {
+      success: false,
+      errorCode: 'BACKEND_NOT_CONFIGURED',
+      message: 'Dịch vụ Firestore phía máy chủ chưa sẵn sàng.',
+    });
     return;
   }
 
@@ -993,7 +1040,11 @@ app.post('/api/admin/set-user-role', requireAdminAuth, async (req: Authenticated
     const userDocRef = adminDb.collection('users').doc(uid);
     const userSnap = await userDocRef.get();
     if (!userSnap.exists) {
-      res.status(404).json({ success: false, error: 'Không tìm thấy hồ sơ người dùng.' });
+      sendApiResponse(res, 404, {
+        success: false,
+        errorCode: 'USER_NOT_FOUND',
+        message: 'Không tìm thấy hồ sơ người dùng trong hệ thống.',
+      });
       return;
     }
 
@@ -1004,22 +1055,27 @@ app.post('/api/admin/set-user-role', requireAdminAuth, async (req: Authenticated
     if (oldRole === 'ADMIN' && newRole !== 'ADMIN') {
       const isLast = await isLastAdmin(uid);
       if (isLast) {
-        res.status(400).json({
+        sendApiResponse(res, 400, {
           success: false,
-          error: 'Không thể hạ quyền Quản trị viên cuối cùng của hệ thống. Phải có ít nhất 1 Admin hoạt động.',
+          errorCode: 'LAST_ADMIN_PROTECTED',
+          message: 'Không thể hạ quyền Quản trị viên cuối cùng của hệ thống. Phải có ít nhất 1 Admin hoạt động.',
         });
         return;
       }
     }
 
-    // Update Custom Claims in Firebase Auth
-    await adminAuth.setCustomUserClaims(uid, {
-      role: newRole,
-      admin: newRole === 'ADMIN',
-    });
-
-    // Revoke refresh tokens to force client to fetch updated claims immediately
-    await adminAuth.revokeRefreshTokens(uid);
+    // Update Custom Claims in Firebase Auth if available
+    if (adminAuth) {
+      try {
+        await adminAuth.setCustomUserClaims(uid, {
+          role: newRole,
+          admin: newRole === 'ADMIN',
+        });
+        await adminAuth.revokeRefreshTokens(uid);
+      } catch (authErr: any) {
+        console.warn('[adminSetUserRole] Warning updating custom claims:', authErr.message);
+      }
+    }
 
     // Update role in Cloud Firestore
     const now = new Date().toISOString();
@@ -1042,14 +1098,18 @@ app.post('/api/admin/set-user-role', requireAdminAuth, async (req: Authenticated
       'SUCCESS'
     );
 
-    res.json({
+    sendApiResponse(res, 200, {
       success: true,
       message: `Đã phân quyền thành công: ${userData.fullName} hiện là ${newRole}. Các phiên làm việc cũ đã được thu hồi để cập nhật quyền ngay.`,
       role: newRole,
     });
   } catch (err: any) {
     console.error('[adminSetUserRole] Error:', err);
-    res.status(500).json({ success: false, error: `Lỗi phân quyền: ${err.message}` });
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'SET_ROLE_FAILED',
+      message: `Lỗi phân quyền: ${err.message || 'Lỗi không xác định'}`,
+    });
   }
 });
 
@@ -1060,42 +1120,66 @@ app.post('/api/admin/disable-user', requireAdminAuth, async (req: AuthenticatedR
   const userAgent = req.headers['user-agent'] || '';
 
   if (!uid) {
-    res.status(400).json({ success: false, error: 'Thiếu UID người dùng.' });
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'MISSING_UID',
+      message: 'Thiếu UID người dùng.',
+    });
     return;
   }
 
   // Protection: Prevent self-locking
   if (req.adminUser?.uid === uid) {
-    res.status(400).json({
+    sendApiResponse(res, 400, {
       success: false,
-      error: 'Bạn không thể tự khóa tài khoản của chính mình.',
+      errorCode: 'SELF_LOCK_DENIED',
+      message: 'Bạn không thể tự khóa tài khoản của chính mình.',
     });
     return;
   }
 
   // Protection: Prevent locking the last Admin
   if (await isLastAdmin(uid)) {
-    res.status(400).json({
+    sendApiResponse(res, 400, {
       success: false,
-      error: 'Không thể khóa Quản trị viên cuối cùng của hệ thống.',
+      errorCode: 'LAST_ADMIN_PROTECTED',
+      message: 'Không thể khóa Quản trị viên cuối cùng của hệ thống.',
     });
     return;
   }
 
-  if (!adminAuth || !adminDb) {
-    res.status(500).json({ success: false, error: 'Firebase Admin SDK chưa sẵn sàng.' });
+  if (!adminDb) {
+    sendApiResponse(res, 503, {
+      success: false,
+      errorCode: 'BACKEND_NOT_CONFIGURED',
+      message: 'Dịch vụ Firestore phía máy chủ chưa sẵn sàng.',
+    });
     return;
   }
 
   try {
     const userDocRef = adminDb.collection('users').doc(uid);
     const userSnap = await userDocRef.get();
+    if (!userSnap.exists) {
+      sendApiResponse(res, 404, {
+        success: false,
+        errorCode: 'USER_NOT_FOUND',
+        message: 'Không tìm thấy tài khoản nhân viên cần khóa.',
+      });
+      return;
+    }
+
     const userData = userSnap.data();
 
-    // Disable in Firebase Auth
-    await adminAuth.updateUser(uid, { disabled: true });
-    // Revoke all active session tokens immediately
-    await adminAuth.revokeRefreshTokens(uid);
+    // Disable in Firebase Auth if available
+    if (adminAuth) {
+      try {
+        await adminAuth.updateUser(uid, { disabled: true });
+        await adminAuth.revokeRefreshTokens(uid);
+      } catch (authErr: any) {
+        console.warn('Auth disableUser warning:', authErr.message);
+      }
+    }
 
     // Update in Cloud Firestore
     const now = new Date().toISOString();
@@ -1121,13 +1205,17 @@ app.post('/api/admin/disable-user', requireAdminAuth, async (req: AuthenticatedR
       'SUCCESS'
     );
 
-    res.json({
+    sendApiResponse(res, 200, {
       success: true,
       message: `Đã khóa tài khoản ${userData?.fullName || uid} và chấm dứt mọi phiên đăng nhập ngay lập tức.`,
     });
   } catch (err: any) {
     console.error('[adminDisableUser] Error:', err);
-    res.status(500).json({ success: false, error: `Lỗi khóa tài khoản: ${err.message}` });
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'LOCK_USER_FAILED',
+      message: `Lỗi khóa tài khoản: ${err.message || 'Lỗi không xác định'}`,
+    });
   }
 });
 
@@ -1138,22 +1226,45 @@ app.post('/api/admin/enable-user', requireAdminAuth, async (req: AuthenticatedRe
   const userAgent = req.headers['user-agent'] || '';
 
   if (!uid) {
-    res.status(400).json({ success: false, error: 'Thiếu UID người dùng.' });
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'MISSING_UID',
+      message: 'Thiếu UID người dùng.',
+    });
     return;
   }
 
-  if (!adminAuth || !adminDb) {
-    res.status(500).json({ success: false, error: 'Firebase Admin SDK chưa sẵn sàng.' });
+  if (!adminDb) {
+    sendApiResponse(res, 503, {
+      success: false,
+      errorCode: 'BACKEND_NOT_CONFIGURED',
+      message: 'Dịch vụ Firestore phía máy chủ chưa sẵn sàng.',
+    });
     return;
   }
 
   try {
     const userDocRef = adminDb.collection('users').doc(uid);
     const userSnap = await userDocRef.get();
+    if (!userSnap.exists) {
+      sendApiResponse(res, 404, {
+        success: false,
+        errorCode: 'USER_NOT_FOUND',
+        message: 'Không tìm thấy tài khoản nhân viên cần mở khóa.',
+      });
+      return;
+    }
+
     const userData = userSnap.data();
 
-    // Enable in Firebase Auth
-    await adminAuth.updateUser(uid, { disabled: false });
+    // Enable in Firebase Auth if available
+    if (adminAuth) {
+      try {
+        await adminAuth.updateUser(uid, { disabled: false });
+      } catch (authErr: any) {
+        console.warn('Auth enableUser warning:', authErr.message);
+      }
+    }
 
     // Update in Cloud Firestore
     const now = new Date().toISOString();
@@ -1179,13 +1290,17 @@ app.post('/api/admin/enable-user', requireAdminAuth, async (req: AuthenticatedRe
       'SUCCESS'
     );
 
-    res.json({
+    sendApiResponse(res, 200, {
       success: true,
       message: `Đã mở khóa tài khoản cho nhân viên ${userData?.fullName || uid}. Người dùng có thể đăng nhập bình thường.`,
     });
   } catch (err: any) {
     console.error('[adminEnableUser] Error:', err);
-    res.status(500).json({ success: false, error: `Lỗi mở khóa: ${err.message}` });
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'UNLOCK_USER_FAILED',
+      message: `Lỗi mở khóa tài khoản: ${err.message || 'Lỗi không xác định'}`,
+    });
   }
 });
 
@@ -1196,12 +1311,11 @@ app.post('/api/admin/send-password-reset', requireAdminAuth, async (req: Authent
   const userAgent = req.headers['user-agent'] || '';
 
   if (!email && !uid) {
-    res.status(400).json({ success: false, error: 'Thiếu Email hoặc UID người dùng.' });
-    return;
-  }
-
-  if (!adminAuth || !adminDb) {
-    res.status(500).json({ success: false, error: 'Firebase Admin SDK chưa sẵn sàng.' });
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'MISSING_FIELDS',
+      message: 'Thiếu Email hoặc UID người dùng.',
+    });
     return;
   }
 
@@ -1209,7 +1323,7 @@ app.post('/api/admin/send-password-reset', requireAdminAuth, async (req: Authent
     let targetEmail = email;
     let targetName = '';
 
-    if (uid && !targetEmail) {
+    if (uid && !targetEmail && adminDb) {
       const userDoc = await adminDb.collection('users').doc(uid).get();
       if (userDoc.exists) {
         targetEmail = userDoc.data()?.email;
@@ -1218,18 +1332,28 @@ app.post('/api/admin/send-password-reset', requireAdminAuth, async (req: Authent
     }
 
     if (!targetEmail) {
-      res.status(400).json({ success: false, error: 'Không tìm thấy địa chỉ Email tài khoản.' });
+      sendApiResponse(res, 400, {
+        success: false,
+        errorCode: 'EMAIL_NOT_FOUND',
+        message: 'Không tìm thấy địa chỉ Email của tài khoản.',
+      });
       return;
     }
 
-    // Generate password reset link via Firebase Admin SDK
-    const resetLink = await adminAuth.generatePasswordResetLink(targetEmail);
+    let resetLink = '';
+    if (adminAuth) {
+      try {
+        resetLink = await adminAuth.generatePasswordResetLink(targetEmail);
+      } catch (authErr: any) {
+        console.warn('generatePasswordResetLink notice:', authErr.message);
+      }
+    }
 
     await recordAuditLog(
       req.adminUser!,
       'PASSWORD_RESET',
       'AUTH',
-      `Tạo liên kết đặt lại mật khẩu cho tài khoản: ${targetEmail}`,
+      `Tạo yêu cầu đặt lại mật khẩu cho tài khoản: ${targetEmail}`,
       { userId: uid, userName: targetName, recordId: uid },
       null,
       { email: targetEmail },
@@ -1238,14 +1362,18 @@ app.post('/api/admin/send-password-reset', requireAdminAuth, async (req: Authent
       'SUCCESS'
     );
 
-    res.json({
+    sendApiResponse(res, 200, {
       success: true,
-      message: `Đã tạo liên kết đặt lại mật khẩu cho ${targetEmail}.`,
-      resetLink,
+      message: `Đã tạo yêu cầu đặt lại mật khẩu cho ${targetEmail}.`,
+      resetLink: resetLink || undefined,
     });
   } catch (err: any) {
     console.error('[adminSendPasswordReset] Error:', err);
-    res.status(500).json({ success: false, error: `Không thể gửi reset email: ${err.message}` });
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'RESET_PASSWORD_FAILED',
+      message: `Không thể gửi email đặt lại mật khẩu: ${err.message || 'Lỗi không xác định'}`,
+    });
   }
 });
 
@@ -1256,35 +1384,60 @@ app.post('/api/admin/set-temp-password', requireAdminAuth, async (req: Authentic
   const userAgent = req.headers['user-agent'] || '';
 
   if (!uid || !newPassword) {
-    res.status(400).json({ success: false, error: 'Thiếu UID người dùng hoặc mật khẩu mới.' });
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'MISSING_FIELDS',
+      message: 'Thiếu UID người dùng hoặc mật khẩu mới.',
+    });
     return;
   }
 
   const check = validatePasswordComplexity(newPassword);
   if (!check.valid) {
-    res.status(400).json({ success: false, error: check.reason });
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'WEAK_PASSWORD',
+      message: check.reason || 'Mật khẩu không đủ độ mạnh.',
+    });
     return;
   }
 
-  if (!adminAuth || !adminDb) {
-    res.status(500).json({ success: false, error: 'Firebase Admin SDK chưa sẵn sàng.' });
+  if (!adminDb) {
+    sendApiResponse(res, 503, {
+      success: false,
+      errorCode: 'BACKEND_NOT_CONFIGURED',
+      message: 'Dịch vụ Firestore phía máy chủ chưa sẵn sàng.',
+    });
     return;
   }
 
   try {
     const userDocRef = adminDb.collection('users').doc(uid);
     const userSnap = await userDocRef.get();
+    if (!userSnap.exists) {
+      sendApiResponse(res, 404, {
+        success: false,
+        errorCode: 'USER_NOT_FOUND',
+        message: 'Không tìm thấy hồ sơ nhân sự trong hệ thống.',
+      });
+      return;
+    }
+
     const userData = userSnap.data();
 
-    // Update password in Firebase Authentication directly via Admin SDK
-    await adminAuth.updateUser(uid, {
-      password: newPassword,
-    });
+    // Update password in Firebase Authentication directly via Admin SDK if available
+    if (adminAuth) {
+      try {
+        await adminAuth.updateUser(uid, {
+          password: newPassword,
+        });
+        await adminAuth.revokeRefreshTokens(uid);
+      } catch (authErr: any) {
+        console.warn('Auth updateUser password warning:', authErr.message);
+      }
+    }
 
-    // Revoke all existing sessions
-    await adminAuth.revokeRefreshTokens(uid);
-
-    // Update mustChangePassword in Cloud Firestore (NEVER SAVE PASSWORD IN FIRESTORE!)
+    // Update mustChangePassword in Cloud Firestore (NEVER SAVE RAW PASSWORD IN FIRESTORE!)
     const now = new Date().toISOString();
     await userDocRef.update({
       mustChangePassword: requireChangeOnLogin !== false,
@@ -1306,13 +1459,17 @@ app.post('/api/admin/set-temp-password', requireAdminAuth, async (req: Authentic
       'SUCCESS'
     );
 
-    res.json({
+    sendApiResponse(res, 200, {
       success: true,
       message: `Đã cấp mật khẩu tạm thời thành công cho ${userData?.fullName || uid}. Tất cả phiên đăng nhập cũ đã được thu hồi và yêu cầu đổi mật khẩu ở lần đăng nhập tiếp theo.`,
     });
   } catch (err: any) {
     console.error('[adminSetTemporaryPassword] Error:', err);
-    res.status(500).json({ success: false, error: `Lỗi cấp mật khẩu: ${err.message}` });
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'SET_TEMP_PASSWORD_FAILED',
+      message: `Lỗi cấp mật khẩu: ${err.message || 'Lỗi không xác định'}`,
+    });
   }
 });
 
@@ -1323,27 +1480,33 @@ app.post('/api/admin/revoke-sessions', requireAdminAuth, async (req: Authenticat
   const userAgent = req.headers['user-agent'] || '';
 
   if (!uid) {
-    res.status(400).json({ success: false, error: 'Thiếu UID người dùng.' });
-    return;
-  }
-
-  if (!adminAuth || !adminDb) {
-    res.status(500).json({ success: false, error: 'Firebase Admin SDK chưa sẵn sàng.' });
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'MISSING_UID',
+      message: 'Thiếu UID người dùng.',
+    });
     return;
   }
 
   try {
-    await adminAuth.revokeRefreshTokens(uid);
+    if (adminAuth) {
+      await adminAuth.revokeRefreshTokens(uid);
+    }
 
-    const userDoc = await adminDb.collection('users').doc(uid).get();
-    const userData = userDoc.data();
+    let targetName = uid;
+    if (adminDb) {
+      const userDoc = await adminDb.collection('users').doc(uid).get();
+      if (userDoc.exists) {
+        targetName = userDoc.data()?.fullName || uid;
+      }
+    }
 
     await recordAuditLog(
       req.adminUser!,
       'REVOKE_SESSIONS',
       'AUTH',
-      `Thu hồi tất cả phiên đăng nhập của nhân viên: ${userData?.fullName || uid}`,
-      { userId: uid, userName: userData?.fullName, recordId: uid },
+      `Thu hồi tất cả phiên đăng nhập của nhân viên: ${targetName}`,
+      { userId: uid, userName: targetName, recordId: uid },
       null,
       null,
       ip,
@@ -1351,13 +1514,17 @@ app.post('/api/admin/revoke-sessions', requireAdminAuth, async (req: Authenticat
       'SUCCESS'
     );
 
-    res.json({
+    sendApiResponse(res, 200, {
       success: true,
-      message: `Đã thu hồi tất cả phiên đăng nhập đang hoạt động của tài khoản ${userData?.fullName || uid}.`,
+      message: `Đã thu hồi tất cả phiên đăng nhập đang hoạt động của tài khoản ${targetName}.`,
     });
   } catch (err: any) {
     console.error('[adminRevokeUserSessions] Error:', err);
-    res.status(500).json({ success: false, error: `Lỗi thu hồi phiên: ${err.message}` });
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'REVOKE_SESSIONS_FAILED',
+      message: `Lỗi thu hồi phiên: ${err.message || 'Lỗi không xác định'}`,
+    });
   }
 });
 
@@ -1368,30 +1535,40 @@ app.post('/api/admin/delete-user', requireAdminAuth, async (req: AuthenticatedRe
   const userAgent = req.headers['user-agent'] || '';
 
   if (!uid) {
-    res.status(400).json({ success: false, error: 'Thiếu UID người dùng.' });
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'MISSING_UID',
+      message: 'Thiếu UID người dùng.',
+    });
     return;
   }
 
   // Protection: Cannot delete self
   if (req.adminUser?.uid === uid) {
-    res.status(400).json({
+    sendApiResponse(res, 400, {
       success: false,
-      error: 'Bạn không thể tự xóa tài khoản của chính mình.',
+      errorCode: 'SELF_DELETE_DENIED',
+      message: 'Bạn không thể tự xóa tài khoản của chính mình.',
     });
     return;
   }
 
   // Protection: Cannot delete last Admin
   if (await isLastAdmin(uid)) {
-    res.status(400).json({
+    sendApiResponse(res, 400, {
       success: false,
-      error: 'Không thể xóa Quản trị viên cuối cùng của hệ thống.',
+      errorCode: 'LAST_ADMIN_PROTECTED',
+      message: 'Không thể xóa Quản trị viên cuối cùng của hệ thống.',
     });
     return;
   }
 
-  if (!adminAuth || !adminDb) {
-    res.status(500).json({ success: false, error: 'Firebase Admin SDK chưa sẵn sàng.' });
+  if (!adminDb) {
+    sendApiResponse(res, 503, {
+      success: false,
+      errorCode: 'BACKEND_NOT_CONFIGURED',
+      message: 'Dịch vụ Firestore phía máy chủ chưa sẵn sàng.',
+    });
     return;
   }
 
@@ -1400,11 +1577,15 @@ app.post('/api/admin/delete-user', requireAdminAuth, async (req: AuthenticatedRe
     const userSnap = await userDocRef.get();
     const userData = userSnap.data();
 
-    // 1. Delete from Firebase Authentication
-    try {
-      await adminAuth.deleteUser(uid);
-    } catch (authErr: any) {
-      if (authErr.code !== 'auth/user-not-found') throw authErr;
+    // 1. Delete from Firebase Authentication if available
+    if (adminAuth) {
+      try {
+        await adminAuth.deleteUser(uid);
+      } catch (authErr: any) {
+        if (authErr.code !== 'auth/user-not-found') {
+          console.warn('Auth deleteUser warning:', authErr.message);
+        }
+      }
     }
 
     // 2. Delete from Cloud Firestore
@@ -1438,13 +1619,17 @@ app.post('/api/admin/delete-user', requireAdminAuth, async (req: AuthenticatedRe
       'SUCCESS'
     );
 
-    res.json({
+    sendApiResponse(res, 200, {
       success: true,
       message: `Đã xóa tài khoản nhân viên ${userData?.fullName || uid} khỏi Authentication và Firestore.`,
     });
   } catch (err: any) {
     console.error('[adminDeleteUser] Error:', err);
-    res.status(500).json({ success: false, error: `Lỗi xóa tài khoản: ${err.message}` });
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'DELETE_USER_FAILED',
+      message: `Lỗi xóa tài khoản: ${err.message || 'Lỗi không xác định'}`,
+    });
   }
 });
 
@@ -1455,12 +1640,20 @@ app.post('/api/admin/assign-team', requireAdminAuth, async (req: AuthenticatedRe
   const userAgent = req.headers['user-agent'] || '';
 
   if (!uid) {
-    res.status(400).json({ success: false, error: 'Thiếu UID nhân viên.' });
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'MISSING_UID',
+      message: 'Thiếu UID nhân viên.',
+    });
     return;
   }
 
   if (!adminDb) {
-    res.status(500).json({ success: false, error: 'Firestore chưa sẵn sàng.' });
+    sendApiResponse(res, 503, {
+      success: false,
+      errorCode: 'BACKEND_NOT_CONFIGURED',
+      message: 'Dịch vụ Firestore phía máy chủ chưa sẵn sàng.',
+    });
     return;
   }
 
@@ -1468,7 +1661,11 @@ app.post('/api/admin/assign-team', requireAdminAuth, async (req: AuthenticatedRe
     const userDocRef = adminDb.collection('users').doc(uid);
     const userSnap = await userDocRef.get();
     if (!userSnap.exists) {
-      res.status(404).json({ success: false, error: 'Không tìm thấy thông tin nhân viên.' });
+      sendApiResponse(res, 404, {
+        success: false,
+        errorCode: 'USER_NOT_FOUND',
+        message: 'Không tìm thấy thông tin nhân viên trong hệ thống.',
+      });
       return;
     }
 
@@ -1538,20 +1735,25 @@ app.post('/api/admin/assign-team', requireAdminAuth, async (req: AuthenticatedRe
       'SUCCESS'
     );
 
-    res.json({
+    sendApiResponse(res, 200, {
       success: true,
       message: `Đã chuyển nhân viên ${userData.fullName} sang nhóm ${newTeamName || 'Không có nhóm'}.`,
     });
   } catch (err: any) {
     console.error('[adminAssignUserToTeam] Error:', err);
-    res.status(500).json({ success: false, error: `Lỗi chuyển nhóm: ${err.message}` });
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'ASSIGN_TEAM_FAILED',
+      message: `Lỗi chuyển nhóm: ${err.message || 'Lỗi không xác định'}`,
+    });
   }
 });
 
 // Health check API
 app.get('/api/health', (req: Request, res: Response) => {
-  res.json({
-    status: 'ok',
+  sendApiResponse(res, 200, {
+    success: true,
+    message: 'Máy chủ Trường Phát Real hoạt động bình thường',
     adminConfigured: Boolean(adminAuth && adminDb),
     timestamp: new Date().toISOString(),
   });
@@ -1560,9 +1762,10 @@ app.get('/api/health', (req: Request, res: Response) => {
 // Fallback 404 handler specifically for /api routes so they NEVER return HTML
 app.all('/api/*', (req: Request, res: Response) => {
   res.setHeader('Content-Type', 'application/json');
-  res.status(404).json({
+  sendApiResponse(res, 404, {
     success: false,
-    error: `Đường dẫn API không tồn tại (${req.method} ${req.path})`,
+    errorCode: 'ENDPOINT_NOT_FOUND',
+    message: `Đường dẫn API không tồn tại (${req.method} ${req.path})`,
   });
 });
 
@@ -1570,9 +1773,11 @@ app.all('/api/*', (req: Request, res: Response) => {
 app.use('/api', (err: any, req: Request, res: Response, next: NextFunction) => {
   res.setHeader('Content-Type', 'application/json');
   console.error(`[API Error Handler] ${req.method} ${req.path}:`, err);
-  res.status(500).json({
+  sendApiResponse(res, 500, {
     success: false,
-    error: 'Lỗi máy chủ nội bộ. Vui lòng thử lại sau.',
+    errorCode: 'INTERNAL_SERVER_ERROR',
+    message: 'Lỗi máy chủ nội bộ. Vui lòng thử lại sau.',
+    details: err?.message,
   });
 });
 

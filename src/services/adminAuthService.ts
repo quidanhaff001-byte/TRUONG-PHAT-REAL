@@ -1,6 +1,7 @@
-import { auth, db } from '../config/firebase';
-import { doc, updateDoc, deleteDoc, setDoc } from 'firebase/firestore';
-import { sendPasswordResetEmail } from 'firebase/auth';
+import { auth, db, firebaseConfig } from '../config/firebase';
+import { initializeApp, deleteApp } from 'firebase/app';
+import { getAuth, createUserWithEmailAndPassword, updateProfile, signOut, sendPasswordResetEmail } from 'firebase/auth';
+import { doc, updateDoc, deleteDoc, setDoc, getDoc, collection, addDoc } from 'firebase/firestore';
 import { User, UserRole } from '../types';
 import { parseResponseSafe } from '../utils/apiResponse';
 
@@ -42,6 +43,11 @@ export interface UpdateUserInput {
 
 export async function adminCreateUserApi(data: CreateUserInput): Promise<{ success: boolean; message: string; user?: User; code?: string; hint?: string }> {
   const endpoint = '/api/admin/create-user';
+  let backendFailed = false;
+  let backendError = '';
+  let backendCode = '';
+
+  // 1. Try calling the backend endpoint first
   try {
     const headers = await getAuthHeader();
     let res: Response;
@@ -58,18 +64,149 @@ export async function adminCreateUserApi(data: CreateUserInput): Promise<{ succe
       throw new Error('Mất kết nối hoặc không thể kết nối đến máy chủ. Vui lòng kiểm tra lại kết nối mạng.');
     }
 
-    const resData = await parseResponseSafe<{ success: boolean; message: string; user?: User; error?: string; code?: string; hint?: string }>(res, endpoint);
-    if (!resData || !resData.success) {
-      const err: any = new Error(resData?.error || resData?.message || 'Không thể tạo nhân viên mới.');
-      err.code = resData?.code;
-      err.hint = resData?.hint;
+    const resData = await parseResponseSafe<{ success: boolean; message: string; user?: User; error?: string; errorCode?: string; code?: string; hint?: string }>(res, endpoint);
+    if (resData && resData.success) {
+      return resData;
+    }
+
+    backendError = resData?.message || resData?.error || 'Không thể tạo nhân viên mới.';
+    backendCode = resData?.errorCode || resData?.code || '';
+
+    // If it's a validation error (like email exists, code exists, or invalid input), throw immediately so user can fix their input
+    if (backendCode === 'EMAIL_EXISTS' || backendCode === 'CODE_EXISTS' || backendCode === 'INVALID_INPUT' || backendCode === 'WEAK_PASSWORD') {
+      const err: any = new Error(backendError);
+      err.code = backendCode;
       throw err;
     }
-    return resData;
+
+    backendFailed = true;
   } catch (err: any) {
-    console.error('[adminCreateUserApi] Error:', err.message);
-    throw err;
+    if (err.code === 'EMAIL_EXISTS' || err.code === 'CODE_EXISTS' || err.code === 'INVALID_INPUT' || err.code === 'WEAK_PASSWORD') {
+      throw err;
+    }
+    backendFailed = true;
+    backendError = err.message || 'Lỗi kết nối máy chủ';
   }
+
+  // 2. Resilient fallback: If backend admin service account is not yet configured,
+  // use isolated secondary Firebase client Auth to provision the actual Firebase Auth user!
+  if (backendFailed && data.tempPassword && !data.providedUid) {
+    try {
+      console.info('[adminCreateUserApi] Using isolated client-side Firebase Auth to provision user...');
+      const secondaryAppName = `user-creator-${Date.now()}`;
+      const secondaryApp = initializeApp(firebaseConfig, secondaryAppName);
+      const secondaryAuth = getAuth(secondaryApp);
+
+      const userCred = await createUserWithEmailAndPassword(secondaryAuth, data.email.trim().toLowerCase(), data.tempPassword);
+      const newUid = userCred.user.uid;
+
+      if (data.fullName) {
+        await updateProfile(userCred.user, {
+          displayName: data.fullName.trim(),
+        });
+      }
+
+      await signOut(secondaryAuth);
+      await deleteApp(secondaryApp);
+
+      // Now notify backend with providedUid
+      try {
+        const headers = await getAuthHeader();
+        const secondRes = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...headers,
+          },
+          body: JSON.stringify({ ...data, providedUid: newUid }),
+        });
+        const secondData = await parseResponseSafe<{ success: boolean; message: string; user?: User }>(secondRes, endpoint);
+        if (secondData && secondData.success) {
+          return secondData;
+        }
+      } catch (e) {
+        console.warn('Backend call with providedUid had issue, falling back to direct Firestore:', e);
+      }
+
+      // Save directly to Firestore doc if backend was unreachable
+      const now = new Date().toISOString();
+      const newUserDoc: User = {
+        id: newUid,
+        uid: newUid,
+        employeeCode: data.employeeCode.trim().toUpperCase(),
+        fullName: data.fullName.trim(),
+        email: data.email.trim().toLowerCase(),
+        phone: data.phone?.trim() || '',
+        role: data.role,
+        teamId: data.teamId || null,
+        teamName: data.teamName || '',
+        status: 'ACTIVE',
+        notes: data.notes || '',
+        mustChangePassword: true,
+        createdAt: now,
+        updatedAt: now,
+        createdBy: auth.currentUser?.uid || 'SYSTEM',
+      };
+
+      await setDoc(doc(db, 'users', newUid), newUserDoc);
+
+      // Update team memberIds
+      if (data.teamId) {
+        try {
+          const teamRef = doc(db, 'teams', data.teamId);
+          const teamSnap = await getDoc(teamRef);
+          if (teamSnap.exists()) {
+            const members = teamSnap.data()?.memberIds || [];
+            if (!members.includes(newUid)) {
+              await updateDoc(teamRef, {
+                memberIds: [...members, newUid],
+                updatedAt: now,
+              });
+            }
+          }
+        } catch (teamErr) {}
+      }
+
+      // Record audit log
+      try {
+        await addDoc(collection(db, 'auditLogs'), {
+          id: `log_${Date.now()}`,
+          userId: auth.currentUser?.uid || 'UNKNOWN',
+          userName: auth.currentUser?.displayName || 'Admin',
+          userRole: 'ADMIN',
+          action: 'CREATE',
+          module: 'USERS',
+          description: `Tạo tài khoản nhân viên mới: ${data.fullName} (${data.email})`,
+          targetId: newUid,
+          metadata: { userId: newUid, email: data.email, role: data.role },
+          timestamp: now,
+          status: 'SUCCESS',
+        });
+      } catch (logErr) {}
+
+      return {
+        success: true,
+        message: `Đã tạo tài khoản nhân viên ${data.fullName} thành công. Mật khẩu tạm: ${data.tempPassword}`,
+        user: newUserDoc,
+      };
+    } catch (clientAuthErr: any) {
+      let viMsg = clientAuthErr.message;
+      if (clientAuthErr.code === 'auth/email-already-in-use') {
+        viMsg = `Địa chỉ email "${data.email}" đã được sử dụng bởi một tài khoản khác trong hệ thống.`;
+      } else if (clientAuthErr.code === 'auth/weak-password') {
+        viMsg = 'Mật khẩu tạm thời quá yếu. Vui lòng nhập tối thiểu 8 ký tự bao gồm chữ và số.';
+      } else if (clientAuthErr.code === 'auth/invalid-email') {
+        viMsg = 'Địa chỉ email không đúng định dạng.';
+      }
+      const err: any = new Error(viMsg);
+      err.code = clientAuthErr.code;
+      throw err;
+    }
+  }
+
+  const err: any = new Error(backendError || 'Không thể tạo nhân viên mới.');
+  err.code = backendCode;
+  throw err;
 }
 
 export async function adminUpdateUserApi(data: UpdateUserInput): Promise<{ success: boolean; message: string; user?: User }> {

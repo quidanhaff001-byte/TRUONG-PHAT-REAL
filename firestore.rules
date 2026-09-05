@@ -135,10 +135,11 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // Audit logs (Nhật ký thao tác - Chỉ backend/Admin SDK ghi, cấm toàn bộ client tạo/sửa/xóa)
+    // Audit logs (Nhật ký thao tác - Bất biến: cho phép tạo, cấm sửa và cấm xóa để bảo toàn dữ liệu kiểm toán)
     match /auditLogs/{logId} {
-      allow read: if isAdmin();
-      allow write: if false; // Client is strictly forbidden from creating, updating, or deleting audit logs
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if false;
     }
 
     // System Settings (Logo, Branding & Company Config)

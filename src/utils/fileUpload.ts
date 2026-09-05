@@ -367,14 +367,13 @@ export async function deleteStorageFile(storagePathOrUrl: string): Promise<boole
 /**
  * Uploads a system logo to Firebase Storage
  */
+/**
+ * Uploads a system logo to hosting storage or Firebase Storage
+ */
 export async function uploadSystemLogo(
   file: File,
   onProgress?: (progress: number) => void
 ): Promise<string> {
-  if (!isStorageConfigured) {
-    throw new Error('Chưa kết nối Firebase Storage.');
-  }
-
   const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/svg+xml'];
   const ext = file.name.split('.').pop()?.toLowerCase() || '';
   const validExts = ['png', 'jpg', 'jpeg', 'webp', 'svg'];
@@ -396,6 +395,38 @@ export async function uploadSystemLogo(
     } catch (e) {
       fileToUpload = file;
     }
+  }
+
+  // 1. Try hosting server upload
+  try {
+    if (onProgress) onProgress(30);
+    const base64Data = await fileToBase64(fileToUpload);
+    if (onProgress) onProgress(60);
+
+    const res = await fetch('/api/upload-image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        base64Data,
+        fileName: `logo_${Date.now()}.${ext || 'png'}`,
+        propertyId: 'system',
+      }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.success && data.url) {
+        if (onProgress) onProgress(100);
+        return data.url;
+      }
+    }
+  } catch (err) {
+    console.warn('[SystemLogo Upload] Fallback attempt to Firebase Storage:', err);
+  }
+
+  // 2. Secondary fallback: Firebase Storage
+  if (!isStorageConfigured) {
+    throw new Error('Không thể tải ảnh lên máy chủ và chưa kết nối Firebase Storage.');
   }
 
   const timestamp = Date.now();
@@ -434,17 +465,13 @@ export async function uploadSystemLogo(
 }
 
 /**
- * Uploads user avatar
+ * Uploads user avatar to hosting storage or Firebase Storage
  */
 export async function uploadUserAvatar(
   arg1: File | string,
   arg2: File | string,
   onProgress?: (progress: number) => void
 ): Promise<string> {
-  if (!isStorageConfigured) {
-    throw new Error('Chưa kết nối Firebase Storage.');
-  }
-
   const file = (arg1 instanceof File ? arg1 : arg2) as File;
   const userId = (typeof arg1 === 'string' ? arg1 : typeof arg2 === 'string' ? arg2 : 'anonymous') as string;
 
@@ -471,6 +498,38 @@ export async function uploadUserAvatar(
     fileToUpload = cropped.file;
   } catch (e) {
     fileToUpload = file;
+  }
+
+  // 1. Try hosting server upload
+  try {
+    if (onProgress) onProgress(30);
+    const base64Data = await fileToBase64(fileToUpload);
+    if (onProgress) onProgress(60);
+
+    const res = await fetch('/api/upload-image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        base64Data,
+        fileName: `avatar_${userId}_${Date.now()}.${ext || 'jpg'}`,
+        propertyId: 'avatars',
+      }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.success && data.url) {
+        if (onProgress) onProgress(100);
+        return data.url;
+      }
+    }
+  } catch (err) {
+    console.warn('[Avatar Upload] Fallback attempt to Firebase Storage:', err);
+  }
+
+  // 2. Secondary fallback: Firebase Storage
+  if (!isStorageConfigured) {
+    throw new Error('Không thể tải ảnh đại diện lên máy chủ và chưa cấu hình Firebase Storage.');
   }
 
   const timestamp = Date.now();
