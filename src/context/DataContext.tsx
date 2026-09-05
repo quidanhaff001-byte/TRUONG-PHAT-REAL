@@ -514,18 +514,22 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     );
 
-    const unsubAuditLogs = onSnapshot(
-      collection(db, 'auditLogs'),
-      (snapshot) => {
-        const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as AuditLog));
-        loaded.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-        setAuditLogs(loaded);
-      },
-      (err) => {
-        console.warn('Snapshot listener notice on auditLogs:', err?.message || err);
-        setAuditLogs([]);
-      }
-    );
+    let unsubAuditLogs = () => {};
+    // Only subscribe to auditLogs if admin or permitted, as per firestore.rules
+    if (currentUser?.role === 'ADMIN' || currentUser?.email === 'quidanh.aff001@gmail.com') {
+      unsubAuditLogs = onSnapshot(
+        collection(db, 'auditLogs'),
+        (snapshot) => {
+          const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as AuditLog));
+          loaded.sort((a, b) => new Date(b.timestamp || (b as any).createdAt || 0).getTime() - new Date(a.timestamp || (a as any).createdAt || 0).getTime());
+          setAuditLogs(loaded);
+        },
+        (err) => {
+          console.warn('Snapshot listener notice on auditLogs:', err?.message || err);
+          setAuditLogs([]);
+        }
+      );
+    }
 
     const unsubNotifs = onSnapshot(
       collection(db, 'notifications'),
@@ -1213,14 +1217,16 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       deleteReason: reason || 'Xóa vào thùng rác',
     };
 
-    setCustomers((prev) => prev.map((c) => (c.id === id ? { ...c, ...updateData } : c)));
     if (isFirebaseConfigured) {
       try {
-        await updateDoc(doc(db, 'customers', id), updateData);
-      } catch (err) {
-        console.error(err);
+        await updateDoc(doc(db, 'customers', id), cleanUndefined(updateData) as any);
+      } catch (err: any) {
+        console.error('[deleteCustomer] Firestore update error:', err);
+        throw new Error(`Lỗi khi chuyển khách hàng vào thùng rác: ${err.message || 'Lỗi kết nối'}`);
       }
     }
+
+    setCustomers((prev) => prev.map((c) => (c.id === id ? { ...c, ...updateData } : c)));
 
     if (cust) {
       await addAuditLog({
@@ -1274,14 +1280,15 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const permanentDeleteCustomer = async (id: string): Promise<void> => {
-    setCustomers((prev) => prev.filter((c) => c.id !== id));
     if (isFirebaseConfigured) {
       try {
         await deleteDoc(doc(db, 'customers', id));
-      } catch (err) {
-        console.error(err);
+      } catch (err: any) {
+        console.error('[permanentDeleteCustomer] Firestore delete error:', err);
+        throw new Error(`Lỗi khi xóa vĩnh viễn khách hàng: ${err.message || 'Lỗi kết nối'}`);
       }
     }
+    setCustomers((prev) => prev.filter((c) => c.id !== id));
     info('Đã xóa vĩnh viễn khách hàng');
   };
 
@@ -1390,61 +1397,68 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       deletedBy: currentUser?.id || 'anonymous',
       deleteReason: reason || 'Xóa hàng loạt vào thùng rác',
     };
-    setCustomers((prev) => prev.map((c) => (customerIds.includes(c.id) ? { ...c, ...updateData } : c)));
     if (isFirebaseConfigured) {
-      for (const id of customerIds) {
-        try {
-          await updateDoc(doc(db, 'customers', id), updateData);
-        } catch (err) {
-          console.error(err);
+      try {
+        const batch = writeBatch(db);
+        for (const id of customerIds) {
+          batch.update(doc(db, 'customers', id), cleanUndefined(updateData) as any);
         }
+        await batch.commit();
+      } catch (err: any) {
+        console.error('[bulkDeleteCustomers] Firestore batch error:', err);
+        throw new Error(`Lỗi khi chuyển danh sách khách hàng vào thùng rác: ${err.message || 'Lỗi kết nối'}`);
       }
     }
+    setCustomers((prev) => prev.map((c) => (customerIds.includes(c.id) ? { ...c, ...updateData } : c)));
     info(`Đã chuyển ${customerIds.length} khách hàng vào thùng rác`);
   };
 
   // Match Actions (Ghép sản phẩm)
   const addMatch = async (matchData: Omit<PropertyMatch, 'id' | 'createdAt'>): Promise<PropertyMatch> => {
     const newId = `match_${Date.now()}`;
-    const newMatch: PropertyMatch = {
+    const newMatch: PropertyMatch = cleanUndefined({
       ...matchData,
       id: newId,
       createdAt: new Date().toISOString(),
-    };
+    });
 
-    setMatches((prev) => [newMatch, ...prev]);
     if (isFirebaseConfigured) {
       try {
         await setDoc(doc(db, 'propertyMatches', newId), newMatch);
-      } catch (err) {
-        console.error(err);
+      } catch (err: any) {
+        console.error('[addMatch] Firestore setDoc error:', err);
+        throw new Error(`Lỗi lưu ghép sản phẩm: ${err.message || 'Lỗi kết nối'}`);
       }
     }
+    setMatches((prev) => [newMatch, ...prev]);
     return newMatch;
   };
 
   const updateMatch = async (id: string, data: Partial<PropertyMatch>): Promise<void> => {
     const now = new Date().toISOString();
-    setMatches((prev) => prev.map((m) => (m.id === id ? { ...m, ...data, updatedAt: now } : m)));
+    const cleanData = cleanUndefined({ ...data, updatedAt: now });
     if (isFirebaseConfigured) {
       try {
-        await updateDoc(doc(db, 'propertyMatches', id), { ...data, updatedAt: now });
-      } catch (err) {
-        console.error(err);
+        await updateDoc(doc(db, 'propertyMatches', id), cleanData as any);
+      } catch (err: any) {
+        console.error('[updateMatch] Firestore update error:', err);
+        throw new Error(`Lỗi cập nhật ghép sản phẩm: ${err.message || 'Lỗi kết nối'}`);
       }
     }
+    setMatches((prev) => prev.map((m) => (m.id === id ? { ...m, ...cleanData } : m)));
     success('Đã cập nhật phản hồi ghép sản phẩm');
   };
 
   const deleteMatch = async (id: string): Promise<void> => {
-    setMatches((prev) => prev.filter((m) => m.id !== id));
     if (isFirebaseConfigured) {
       try {
         await deleteDoc(doc(db, 'propertyMatches', id));
-      } catch (err) {
-        console.error(err);
+      } catch (err: any) {
+        console.error('[deleteMatch] Firestore delete error:', err);
+        throw new Error(`Lỗi xóa ghép sản phẩm: ${err.message || 'Lỗi kết nối'}`);
       }
     }
+    setMatches((prev) => prev.filter((m) => m.id !== id));
   };
 
   const markMatchSent = async (id: string, method: string = 'Zalo'): Promise<void> => {
@@ -1520,26 +1534,29 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const updateAppointment = async (id: string, data: Partial<Appointment>): Promise<void> => {
     const now = new Date().toISOString();
-    setAppointments((prev) => prev.map((a) => (a.id === id ? { ...a, ...data, updatedAt: now } : a)));
+    const cleanData = cleanUndefined({ ...data, updatedAt: now });
     if (isFirebaseConfigured) {
       try {
-        await updateDoc(doc(db, 'appointments', id), { ...data, updatedAt: now });
-      } catch (err) {
-        console.error(err);
+        await updateDoc(doc(db, 'appointments', id), cleanData as any);
+      } catch (err: any) {
+        console.error('[updateAppointment] Firestore update error:', err);
+        throw new Error(`Lỗi khi cập nhật lịch hẹn: ${err.message || 'Lỗi kết nối'}`);
       }
     }
+    setAppointments((prev) => prev.map((a) => (a.id === id ? { ...a, ...cleanData } : a)));
     success('Đã cập nhật lịch hẹn');
   };
 
   const deleteAppointment = async (id: string): Promise<void> => {
-    setAppointments((prev) => prev.filter((a) => a.id !== id));
     if (isFirebaseConfigured) {
       try {
         await deleteDoc(doc(db, 'appointments', id));
-      } catch (err) {
-        console.error(err);
+      } catch (err: any) {
+        console.error('[deleteAppointment] Firestore delete error:', err);
+        throw new Error(`Lỗi khi xóa lịch hẹn: ${err.message || 'Lỗi kết nối'}`);
       }
     }
+    setAppointments((prev) => prev.filter((a) => a.id !== id));
     info('Đã xóa lịch hẹn');
   };
 

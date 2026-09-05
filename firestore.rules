@@ -2,7 +2,7 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Helper functions for Role-Based Access Control (RBAC) & Eight Pillars of Security
+    // Helper functions for Role-Based Access Control (RBAC)
     function isSignedIn() {
       return request.auth != null;
     }
@@ -32,24 +32,21 @@ service cloud.firestore {
       );
     }
 
-    // 3. Môi giới (AGENT) - Ký gửi, quản lý nguồn hàng & khách hàng phụ trách
+    // 3. Môi giới (AGENT)
     function isAgent() {
       return isSignedIn();
     }
 
     // Users Collection (Hồ sơ nhân sự)
+    // Chỉ ADMIN được sửa role, status. Người dùng chỉ được sửa thông tin cá nhân của chính mình.
     match /users/{userId} {
-      // Any authenticated user can read directory for team lookup & assignments
       allow read: if isSignedIn();
-      // Admin has full write access, or user can initialize their own profile
       allow create: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
-      // Admin can delete
-      allow delete: if isAdmin();
-      // Users can update their own non-role profile fields, or Admin can update anything
       allow update: if isAdmin() || (
         isSignedIn() && request.auth.uid == userId &&
         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'status', 'lockReason'])
       );
+      allow delete: if isAdmin();
     }
 
     // Teams Collection (Phòng ban & Đội nhóm)
@@ -59,6 +56,7 @@ service cloud.firestore {
     }
 
     // Properties Collection (Nguồn hàng Bất Động Sản)
+    // Không ai được xóa cứng trực tiếp từ danh sách (chỉ ADMIN được xóa vĩnh viễn trong thùng rác)
     match /properties/{propertyId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
@@ -72,6 +70,7 @@ service cloud.firestore {
     }
 
     // Customers Collection (Khách hàng & Nhu cầu)
+    // Không ai được xóa cứng trực tiếp từ danh sách (chỉ ADMIN được xóa vĩnh viễn trong thùng rác)
     match /customers/{customerId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
@@ -123,6 +122,7 @@ service cloud.firestore {
     }
 
     // Commissions (Quản lý & Phân chia hoa hồng)
+    // Chỉ ADMIN được duyệt (APPROVED) và xác nhận chi trả (PAID)
     match /commissions/{commissionId} {
       allow read: if isSignedIn();
       allow write: if isAdmin() || isTeamLeader();
@@ -135,10 +135,18 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // Audit logs (Nhật ký thao tác - Bất biến: cho phép tạo, cấm sửa và cấm xóa để bảo toàn dữ liệu kiểm toán)
+    // Audit logs (Nhật ký thao tác)
+    // - Chỉ ADMIN được đọc
+    // - Mọi người dùng đã xác thực được tạo (với actorUid của chính mình)
+    // - Bất biến: cấm sửa và cấm xóa
     match /auditLogs/{logId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
+      allow read: if isAdmin();
+      allow create: if isSignedIn() && (
+        !('actorUid' in request.resource.data) ||
+        request.resource.data.actorUid == request.auth.uid ||
+        request.resource.data.userId == request.auth.uid ||
+        isAdmin()
+      );
       allow update, delete: if false;
     }
 
@@ -148,7 +156,7 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // Locations (Danh mục địa bàn hoạt động Tỉnh An Giang mới)
+    // Locations (Danh mục địa bàn hoạt động Tỉnh An Giang)
     match /locations/{locationId} {
       allow read: if isSignedIn();
       allow write: if isAdmin();

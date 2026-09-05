@@ -905,9 +905,9 @@ app.post('/api/admin/create-user', requireAdminAuth, async (req: AuthenticatedRe
   }
 });
 
-// 2. adminUpdateUser
-app.post('/api/admin/update-user', requireAdminAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-  const { uid, fullName, phone, employeeCode, teamId, teamName, notes, avatarUrl } = req.body;
+// 2. adminUpdateUser handler (Supports both PATCH and POST /api/admin/update-user)
+const handleAdminUpdateUser = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const { uid, displayName, fullName, email, phone, employeeCode, role, status, teamId, teamName, notes, avatarUrl } = req.body;
   const ip = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '';
   const userAgent = req.headers['user-agent'] || '';
 
@@ -942,44 +942,117 @@ app.post('/api/admin/update-user', requireAdminAuth, async (req: AuthenticatedRe
       return;
     }
 
-    const beforeData = userSnap.data();
+    const beforeData = userSnap.data() || {};
+    const finalName = displayName || fullName || beforeData.fullName || beforeData.displayName || '';
 
-    // Update Firebase Auth display name / phone if provided and adminAuth is available
+    // Check duplicate employeeCode if changed
+    if (employeeCode && employeeCode.trim().toUpperCase() !== (beforeData.employeeCode || '').toUpperCase()) {
+      const existingCodeSnap = await adminDb
+        .collection('users')
+        .where('employeeCode', '==', employeeCode.trim().toUpperCase())
+        .limit(1)
+        .get();
+
+      if (!existingCodeSnap.empty && existingCodeSnap.docs[0].id !== uid) {
+        sendApiResponse(res, 400, {
+          success: false,
+          errorCode: 'EMPLOYEE_CODE_EXISTS',
+          message: `Mã nhân viên "${employeeCode.trim().toUpperCase()}" đã được sử dụng cho nhân sự khác.`,
+        });
+        return;
+      }
+    }
+
+    // Check duplicate email if changed
+    if (email && email.trim().toLowerCase() !== (beforeData.email || '').toLowerCase()) {
+      const newEmail = email.trim().toLowerCase();
+      const existingEmailSnap = await adminDb
+        .collection('users')
+        .where('email', '==', newEmail)
+        .limit(1)
+        .get();
+
+      if (!existingEmailSnap.empty && existingEmailSnap.docs[0].id !== uid) {
+        sendApiResponse(res, 400, {
+          success: false,
+          errorCode: 'EMAIL_ALREADY_EXISTS',
+          message: `Email "${newEmail}" đã được sử dụng cho tài khoản khác trong hệ thống.`,
+        });
+        return;
+      }
+    }
+
+    // Update Firebase Auth user if available
     if (adminAuth) {
       try {
-        await adminAuth.updateUser(uid, {
-          displayName: fullName || beforeData?.fullName,
-          phoneNumber: phone && phone.startsWith('+') ? phone : undefined,
-        });
+        const authUpdates: Record<string, any> = {};
+        if (finalName) authUpdates.displayName = finalName;
+        if (email && email.trim().toLowerCase() !== (beforeData.email || '').toLowerCase()) {
+          authUpdates.email = email.trim().toLowerCase();
+        }
+        if (phone && phone.startsWith('+')) {
+          authUpdates.phoneNumber = phone.trim();
+        }
+        if (status === 'LOCKED') {
+          authUpdates.disabled = true;
+        } else if (status === 'ACTIVE') {
+          authUpdates.disabled = false;
+        }
+
+        if (Object.keys(authUpdates).length > 0) {
+          await adminAuth.updateUser(uid, authUpdates);
+        }
+
+        // Update custom user claims if role changed
+        if (role && role !== beforeData.role) {
+          await adminAuth.setCustomUserClaims(uid, { role });
+          // Revoke refresh tokens to force re-issue of token with new claims
+          await adminAuth.revokeRefreshTokens(uid).catch(() => {});
+        }
       } catch (authErr: any) {
-        console.warn('Auth updateUser notice:', authErr.message);
+        console.warn('[adminUpdateUser] Auth update note:', authErr.message);
+        if (authErr.code === 'auth/email-already-exists') {
+          sendApiResponse(res, 400, {
+            success: false,
+            errorCode: 'EMAIL_ALREADY_EXISTS',
+            message: 'Email này đã được sử dụng cho một tài khoản khác trên hệ thống xác thực.',
+          });
+          return;
+        }
       }
     }
 
     const now = new Date().toISOString();
-    const updatePayload: any = {
+    const updatePayload: Record<string, any> = {
       updatedAt: now,
-      updatedBy: req.adminUser?.uid,
+      updatedBy: req.adminUser?.uid || 'ADMIN',
     };
 
-    if (fullName !== undefined) updatePayload.fullName = fullName.trim();
+    if (fullName !== undefined || displayName !== undefined) {
+      updatePayload.fullName = finalName;
+      updatePayload.displayName = finalName;
+    }
+    if (email !== undefined) updatePayload.email = email.trim().toLowerCase();
     if (phone !== undefined) updatePayload.phone = phone.trim();
     if (employeeCode !== undefined) updatePayload.employeeCode = employeeCode.trim().toUpperCase();
+    if (role !== undefined) updatePayload.role = role;
+    if (status !== undefined) updatePayload.status = status;
     if (teamId !== undefined) updatePayload.teamId = teamId || null;
     if (teamName !== undefined) updatePayload.teamName = teamName || '';
     if (notes !== undefined) updatePayload.notes = notes;
     if (avatarUrl !== undefined) updatePayload.avatarUrl = avatarUrl;
 
-    await userDocRef.update(updatePayload);
+    const sanitizedPayload = sanitizeFirestoreData(updatePayload);
+    await userDocRef.update(sanitizedPayload);
 
-    const afterData = { ...beforeData, ...updatePayload };
+    const afterData = { ...beforeData, ...sanitizedPayload };
 
     await recordAuditLog(
       req.adminUser!,
-      'UPDATE',
+      'UPDATE_USER',
       'USERS',
-      `Cập nhật thông tin nhân viên: ${fullName || beforeData?.fullName}`,
-      { userId: uid, userName: fullName || beforeData?.fullName, recordId: uid },
+      `Cập nhật hồ sơ nhân viên: ${finalName} (${afterData.employeeCode || uid})`,
+      { userId: uid, userName: finalName, recordId: uid },
       beforeData,
       afterData,
       ip,
@@ -990,6 +1063,7 @@ app.post('/api/admin/update-user', requireAdminAuth, async (req: AuthenticatedRe
     sendApiResponse(res, 200, {
       success: true,
       message: 'Cập nhật thông tin nhân viên thành công.',
+      data: { user: afterData },
       user: afterData,
     });
   } catch (err: any) {
@@ -998,6 +1072,190 @@ app.post('/api/admin/update-user', requireAdminAuth, async (req: AuthenticatedRe
       success: false,
       errorCode: 'UPDATE_USER_FAILED',
       message: `Lỗi cập nhật: ${err.message || 'Lỗi không xác định'}`,
+    });
+  }
+};
+
+app.patch('/api/admin/update-user', requireAdminAuth, handleAdminUpdateUser);
+app.post('/api/admin/update-user', requireAdminAuth, handleAdminUpdateUser);
+
+// Check if user has corresponding Auth user (Orphan Detection)
+app.get('/api/admin/verify-user-auth', requireAdminAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const uid = req.query.uid as string;
+  if (!uid) {
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'MISSING_UID',
+      message: 'Thiếu mã UID người dùng.',
+    });
+    return;
+  }
+
+  if (!adminAuth) {
+    sendApiResponse(res, 200, {
+      success: true,
+      message: 'Dịch vụ xác thực Auth chưa sẵn sàng',
+      data: { exists: true, isOrphan: false },
+    });
+    return;
+  }
+
+  try {
+    const userRecord = await adminAuth.getUser(uid);
+    sendApiResponse(res, 200, {
+      success: true,
+      message: 'Tài khoản xác thực tồn tại',
+      data: { exists: true, authEmail: userRecord.email, isOrphan: false },
+    });
+  } catch (err: any) {
+    if (err.code === 'auth/user-not-found') {
+      sendApiResponse(res, 200, {
+        success: true,
+        message: 'Không tìm thấy tài khoản xác thực (Hồ sơ mồ côi)',
+        data: { exists: false, isOrphan: true },
+      });
+      return;
+    }
+    sendApiResponse(res, 200, {
+      success: true,
+      message: 'Đã kiểm tra trạng thái xác thực',
+      data: { exists: true, isOrphan: false },
+    });
+  }
+});
+
+// Resolve orphan user (recreate Auth or delete orphan document)
+app.post('/api/admin/resolve-orphan-user', requireAdminAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const { uid, action, tempPassword } = req.body;
+  const ip = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '';
+  const userAgent = req.headers['user-agent'] || '';
+
+  if (!uid || !action) {
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'INVALID_INPUT',
+      message: 'Thiếu UID hoặc thao tác xử lý.',
+    });
+    return;
+  }
+
+  if (!adminDb) {
+    sendApiResponse(res, 503, {
+      success: false,
+      errorCode: 'BACKEND_NOT_CONFIGURED',
+      message: 'Dịch vụ Firestore phía máy chủ chưa sẵn sàng.',
+    });
+    return;
+  }
+
+  try {
+    const userDocRef = adminDb.collection('users').doc(uid);
+    const userSnap = await userDocRef.get();
+
+    if (!userSnap.exists) {
+      sendApiResponse(res, 404, {
+        success: false,
+        errorCode: 'USER_NOT_FOUND',
+        message: 'Hồ sơ người dùng không tồn tại.',
+      });
+      return;
+    }
+
+    const userData = userSnap.data() || {};
+
+    if (action === 'DELETE_ORPHAN') {
+      await userDocRef.delete();
+
+      await recordAuditLog(
+        req.adminUser!,
+        'DELETE_ORPHAN_DATA',
+        'USERS',
+        `Xóa hồ sơ nhân viên mồ côi: ${userData.fullName} (${userData.employeeCode || uid})`,
+        { userId: uid, userName: userData.fullName, recordId: uid },
+        userData,
+        null,
+        ip,
+        userAgent,
+        'SUCCESS'
+      );
+
+      sendApiResponse(res, 200, {
+        success: true,
+        message: 'Đã xóa hồ sơ mồ côi thành công.',
+      });
+      return;
+    }
+
+    if (action === 'RECREATE_AUTH') {
+      if (!adminAuth) {
+        sendApiResponse(res, 503, {
+          success: false,
+          errorCode: 'AUTH_NOT_READY',
+          message: 'Dịch vụ xác thực phía máy chủ chưa sẵn sàng.',
+        });
+        return;
+      }
+
+      const email = userData.email;
+      if (!email) {
+        sendApiResponse(res, 400, {
+          success: false,
+          errorCode: 'MISSING_EMAIL',
+          message: 'Hồ sơ không có địa chỉ email để tạo tài khoản xác thực.',
+        });
+        return;
+      }
+
+      const password = tempPassword || 'TruongPhat@2025';
+      const createdAuth = await adminAuth.createUser({
+        uid,
+        email,
+        displayName: userData.fullName || userData.displayName || 'Nhân viên',
+        password,
+        disabled: userData.status === 'LOCKED',
+      });
+
+      if (userData.role) {
+        await adminAuth.setCustomUserClaims(uid, { role: userData.role });
+      }
+
+      await userDocRef.update({
+        mustChangePassword: true,
+        authRecreated: true,
+        updatedAt: new Date().toISOString(),
+      });
+
+      await recordAuditLog(
+        req.adminUser!,
+        'RECREATE_AUTH_USER',
+        'USERS',
+        `Tạo lại tài khoản xác thực Firebase Authentication cho hồ sơ mồ côi: ${userData.fullName} (${email})`,
+        { userId: uid, userName: userData.fullName, recordId: uid },
+        null,
+        { uid, email, role: userData.role },
+        ip,
+        userAgent,
+        'SUCCESS'
+      );
+
+      sendApiResponse(res, 200, {
+        success: true,
+        message: `Đã tạo lại tài khoản xác thực thành công cho ${email}. Mật khẩu tạm: ${password}`,
+      });
+      return;
+    }
+
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'INVALID_ACTION',
+      message: 'Hành động không hợp lệ.',
+    });
+  } catch (err: any) {
+    console.error('[resolveOrphanUser] Error:', err);
+    sendApiResponse(res, 400, {
+      success: false,
+      errorCode: 'RESOLVE_ORPHAN_FAILED',
+      message: `Thao tác thất bại: ${err.message || 'Lỗi không xác định'}`,
     });
   }
 });

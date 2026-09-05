@@ -1,35 +1,67 @@
 import { auth, db } from '../config/firebase';
-import { setDoc, doc } from 'firebase/firestore';
-import { cleanUndefined } from '../utils/firestoreSanitizer';
+import { setDoc, doc, serverTimestamp } from 'firebase/firestore';
+import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
 
-export interface BackendAuditLogInput {
+export interface AuditLogPayload {
+  id?: string;
+  actorUid?: string;
+  actorEmail?: string;
+  actorRole?: string;
   action: string;
-  module: string;
-  description: string;
+  entityType?: string;
+  entityId?: string;
+  before?: Record<string, any> | null;
+  after?: Record<string, any> | null;
+  requestId?: string | null;
+  createdAt?: any;
+
+  // Backward compatibility fields for UI views
+  module?: string;
+  description?: string;
   details?: string;
   recordId?: string;
   recordCode?: string;
   recordName?: string;
   teamId?: string | null;
-  targetUserId?: string;
-  targetUserName?: string;
-  beforeData?: any;
-  afterData?: any;
   level?: 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL';
   userId?: string;
   userName?: string;
   userEmail?: string;
   userRole?: string;
+  timestamp?: string;
+  newData?: any;
+  oldData?: any;
 }
 
-export async function sendAuditLogToBackend(log: BackendAuditLogInput): Promise<boolean> {
+export async function sendAuditLogToBackend(input: AuditLogPayload): Promise<boolean> {
   const endpoint = '/api/audit-log';
-  const payload = cleanUndefined({
-    ...log,
-    teamId: log.teamId || null,
-    userId: log.userId || auth.currentUser?.uid || 'anonymous',
-    userEmail: log.userEmail || auth.currentUser?.email || '',
-    userName: log.userName || auth.currentUser?.displayName || 'Người dùng',
+  const now = new Date().toISOString();
+  const currentActorUid = auth.currentUser?.uid || input.actorUid || input.userId || 'anonymous';
+  const currentActorEmail = auth.currentUser?.email || input.actorEmail || input.userEmail || '';
+  const currentActorRole = input.actorRole || input.userRole || 'AGENT';
+
+  const entityType = input.entityType || input.module || 'SYSTEM';
+  const entityId = input.entityId || input.recordId || '';
+
+  const standardized = sanitizeFirestoreData({
+    ...input,
+    actorUid: currentActorUid,
+    actorEmail: currentActorEmail,
+    actorRole: currentActorRole,
+    entityType,
+    entityId,
+    before: input.before || input.oldData || null,
+    after: input.after || input.newData || null,
+    requestId: input.requestId || null,
+
+    // UI compatibility
+    userId: currentActorUid,
+    userEmail: currentActorEmail,
+    userName: input.userName || auth.currentUser?.displayName || 'Người dùng',
+    userRole: currentActorRole,
+    module: entityType,
+    description: input.description || `${input.action} trên ${entityType}`,
+    timestamp: now,
   });
 
   try {
@@ -44,39 +76,41 @@ export async function sendAuditLogToBackend(log: BackendAuditLogInput): Promise<
           headers['Authorization'] = `Bearer ${token}`;
         }
       } catch (tokenErr) {
-        console.warn('Could not get auth token for audit log:', tokenErr);
+        console.warn('Không thể lấy auth token cho audit log:', tokenErr);
       }
     }
 
     const res = await fetch(endpoint, {
       method: 'POST',
       headers,
-      body: JSON.stringify(payload),
+      body: JSON.stringify(standardized),
     });
 
     if (res.ok) {
       return true;
     }
 
-    // Direct Firestore write fallback if backend response was not ok
-    const logId = `log_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+    // Direct Firestore write fallback
+    const logId = input.id || `log_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     await setDoc(doc(db, 'auditLogs', logId), {
-      ...payload,
+      ...standardized,
       id: logId,
-      timestamp: new Date().toISOString(),
+      createdAt: serverTimestamp(),
+      timestamp: now,
     });
     return true;
   } catch (err) {
     try {
-      const logId = `log_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+      const logId = input.id || `log_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
       await setDoc(doc(db, 'auditLogs', logId), {
-        ...payload,
+        ...standardized,
         id: logId,
-        timestamp: new Date().toISOString(),
+        createdAt: serverTimestamp(),
+        timestamp: now,
       });
       return true;
     } catch (fsErr) {
-      console.warn('[AuditLog Service] Backend and Firestore recording notice:', fsErr);
+      console.warn('[AuditLog Service] Không thể ghi Audit Log trực tiếp:', fsErr);
       return false;
     }
   }
