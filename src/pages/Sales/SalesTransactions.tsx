@@ -78,16 +78,16 @@ export const SalesTransactions: React.FC = () => {
   const [notes, setNotes] = useState('');
 
   // Filtered list
-  const filteredTransactions纯 = useMemo(() => {
+  const filteredTransactions = useMemo(() => {
     return transactions.filter((tr) => {
       if (filterType !== 'ALL' && tr.type !== filterType) return false;
       if (filterStatus !== 'ALL' && tr.status !== filterStatus) return false;
       if (searchQuery) {
-        const q的的 = searchQuery.toLowerCase();
-        const matchCode = tr.code.toLowerCase().includes(q的的);
-        const matchProp = tr.propertyTitle.toLowerCase().includes(q的的) || tr.propertyCode.toLowerCase().includes(q的的);
-        const matchBuyer = tr.buyerName.toLowerCase().includes(q的的) || tr.buyerPhone.includes(q的的);
-        const matchSeller = tr.sellerName.toLowerCase().includes(q的的);
+        const q = searchQuery.toLowerCase();
+        const matchCode = tr.code.toLowerCase().includes(q);
+        const matchProp = tr.propertyTitle.toLowerCase().includes(q) || tr.propertyCode.toLowerCase().includes(q);
+        const matchBuyer = tr.buyerName.toLowerCase().includes(q) || tr.buyerPhone.includes(q);
+        const matchSeller = tr.sellerName.toLowerCase().includes(q);
         if (!matchCode && !matchProp && !matchBuyer && !matchSeller) return false;
       }
       return true;
@@ -316,11 +316,11 @@ export const SalesTransactions: React.FC = () => {
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
         <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
           <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-            Danh sách hồ sơ giao dịch ({filteredTransactions纯.length})
+            Danh sách hồ sơ giao dịch ({filteredTransactions.length})
           </span>
         </div>
 
-        {filteredTransactions纯.length === 0 ? (
+        {filteredTransactions.length === 0 ? (
           <div className="py-16 text-center text-slate-400 space-y-2">
             <BadgePercent className="w-10 h-10 mx-auto text-slate-300 stroke-1" />
             <p className="text-sm font-semibold">Chưa có giao dịch mua bán nào</p>
@@ -328,7 +328,7 @@ export const SalesTransactions: React.FC = () => {
           </div>
         ) : (
           <div className="divide-y divide-slate-100">
-            {filteredTransactions纯.map((tr) => {
+            {filteredTransactions.map((tr) => {
               const currentStep = tr.step || 1;
               const isCompleted = tr.status === 'Hoàn tất';
 

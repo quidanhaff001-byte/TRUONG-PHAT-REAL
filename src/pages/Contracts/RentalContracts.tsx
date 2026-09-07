@@ -93,11 +93,11 @@ export const RentalContracts: React.FC = () => {
 
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
-        const matchCode述 = c.code.toLowerCase().includes(q);
+        const matchCode = c.code.toLowerCase().includes(q);
         const matchProp = c.propertyTitle.toLowerCase().includes(q) || c.propertyCode.toLowerCase().includes(q);
         const matchCust = c.customerName.toLowerCase().includes(q) || c.customerPhone.includes(q);
         const matchLandlord = c.landlordName.toLowerCase().includes(q);
-        if (!matchCode述 && !matchProp && !matchCust && !matchLandlord) return false;
+        if (!matchCode && !matchProp && !matchCust && !matchLandlord) return false;
       }
 
       return true;
@@ -187,7 +187,7 @@ export const RentalContracts: React.FC = () => {
   };
 
   // Handle Terminate
-  const handleTerminateSubmit丛 = async () => {
+  const handleTerminateSubmit = async () => {
     if (!selectedContract) return;
     await terminateRentalContract(selectedContract.id, terminateDate, terminateReason);
     setIsTerminateModalOpen(false);
@@ -785,7 +785,7 @@ export const RentalContracts: React.FC = () => {
                 Hủy
               </button>
               <button
-                onClick={handleTerminateSubmit丛}
+                onClick={handleTerminateSubmit}
                 className="px-4 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-xl flex items-center gap-1.5"
               >
                 <XCircle className="w-4 h-4" />

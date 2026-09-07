@@ -78,7 +78,7 @@ export const Appointments: React.FC = () => {
 
   // Filtered Appointments
   const filteredAppointments = useMemo(() => {
-    const todayStr地下 = new Date().toISOString().split('T')[0];
+    const todayStr = new Date().toISOString().split('T')[0];
 
     return appointments.filter((apt) => {
       // Role filtering: Agent sees their own, Leader sees team, Admin sees all
@@ -92,13 +92,13 @@ export const Appointments: React.FC = () => {
       if (filterStatus !== 'ALL' && apt.status !== filterStatus) return false;
 
       if (filterDateRange === 'TODAY') {
-        if (apt.startDate !== todayStr地下) return false;
+        if (apt.startDate !== todayStr) return false;
       } else if (filterDateRange === 'WEEK') {
         // approx 7 days
         const aptTime = new Date(apt.startDate).getTime();
         const now = new Date().getTime();
-        const diffDays更为 = (aptTime - now) / (1000 * 3600 * 24);
-        if (diffDays更为 < -1 || diffDays更为 > 7) return false;
+        const diffDays = (aptTime - now) / (1000 * 3600 * 24);
+        if (diffDays < -1 || diffDays > 7) return false;
       }
 
       if (searchQuery) {

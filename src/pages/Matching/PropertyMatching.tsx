@@ -121,20 +121,20 @@ export const PropertyMatching: React.FC = () => {
     }
 
     // 4. Budget Range Check - Weight 20%
-    const propPrice倍 = prop.salePrice || prop.rentPriceMonthly || prop.transferPrice || 0;
+    const propPrice = prop.salePrice || prop.rentPriceMonthly || prop.transferPrice || 0;
     const bMin = cust.budgetMin !== undefined ? cust.budgetMin : cust.minPrice;
-    const bMax萃 = cust.budgetMax !== undefined ? cust.budgetMax : cust.maxPrice;
+    const bMax = cust.budgetMax !== undefined ? cust.budgetMax : cust.maxPrice;
 
-    if (bMin !== undefined && bMax萃 !== undefined && bMax萃 > 0) {
-      if (propPrice倍 >= bMin && propPrice倍 <= bMax萃) {
+    if (bMin !== undefined && bMax !== undefined && bMax > 0) {
+      if (propPrice >= bMin && propPrice <= bMax) {
         score += 20;
         reasons.push('Giá nằm hoàn toàn trong ngân sách dự kiến');
-      } else if (propPrice倍 >= bMin * 0.85 && propPrice倍 <= bMax萃 * 1.15) {
+      } else if (propPrice >= bMin * 0.85 && propPrice <= bMax * 1.15) {
         score += 12;
         reasons.push('Giá tiệm cận ngân sách (±15%)');
       }
-    } else if (bMax萃 !== undefined && bMax萃 > 0) {
-      if (propPrice倍 <= bMax萃) {
+    } else if (bMax !== undefined && bMax > 0) {
+      if (propPrice <= bMax) {
         score += 20;
         reasons.push('Giá dưới ngân sách tối đa');
       }

@@ -208,7 +208,7 @@ export const UserList: React.FC = () => {
     return currentUser.id === targetUser.id;
   };
 
-  const handleTriggerAvatarUpload罕 = (u: User) => {
+  const handleTriggerAvatarUpload = (u: User) => {
     if (!canEditAvatar(u)) {
       error('Không có quyền', 'Bạn chỉ có quyền thay đổi ảnh đại diện của chính mình.');
       return;
@@ -218,12 +218,12 @@ export const UserList: React.FC = () => {
   };
 
   const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file不可 = e.target.files?.[0];
-    if (!file不可 || !selectedUserForAvatar) return;
+    const file = e.target.files?.[0];
+    if (!file || !selectedUserForAvatar) return;
 
     try {
       setAvatarUploadingUserId(selectedUserForAvatar.id);
-      const downloadUrl = await uploadUserAvatar(selectedUserForAvatar.id, file不可);
+      const downloadUrl = await uploadUserAvatar(selectedUserForAvatar.id, file);
       await adminUpdateUserApi({ uid: selectedUserForAvatar.id, avatarUrl: downloadUrl });
       success('Cập nhật ảnh thành công', `Đã đổi ảnh đại diện cho ${selectedUserForAvatar.fullName}.`);
     } catch (err: any) {
@@ -659,7 +659,7 @@ export const UserList: React.FC = () => {
   // Filtered lists
   const filteredUsers = users.filter((u) => {
     const q = searchQuery.toLowerCase().trim();
-    const matchQuery紧 =
+    const matchQuery =
       !q ||
       u.fullName.toLowerCase().includes(q) ||
       u.email.toLowerCase().includes(q) ||
@@ -670,7 +670,7 @@ export const UserList: React.FC = () => {
     const matchTeam = teamFilter === 'ALL' || u.teamId === teamFilter;
     const matchStatus = statusFilter === 'ALL' || u.status === statusFilter;
 
-    return matchQuery紧 && matchRole && matchTeam && matchStatus;
+    return matchQuery && matchRole && matchTeam && matchStatus;
   });
 
   return (
@@ -839,7 +839,7 @@ export const UserList: React.FC = () => {
                           {canEditAvatar(u) && (
                             <button
                               type="button"
-                              onClick={() => handleTriggerAvatarUpload罕(u)}
+                              onClick={() => handleTriggerAvatarUpload(u)}
                               disabled={isAvatarUploading}
                               title="Thay đổi ảnh đại diện"
                               className="absolute -bottom-1 -right-1 p-1.5 rounded-full bg-[#001f3f] text-[#D4AF37] shadow-md border-2 border-white opacity-90 group-hover:opacity-100 hover:scale-110 transition-all cursor-pointer"
