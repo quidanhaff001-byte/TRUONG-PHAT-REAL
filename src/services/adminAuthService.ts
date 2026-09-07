@@ -122,11 +122,17 @@ export async function adminUpdateUserApi(data: UpdateUserInput): Promise<{ succe
       email: data.email ? data.email.trim().toLowerCase() : undefined,
       phone: data.phone ? data.phone.trim() : undefined,
       role: data.role,
+      roleName: data.roleName,
       teamId: data.teamId !== undefined ? data.teamId : undefined,
       teamName: data.teamName,
+      department: data.department,
+      dateOfBirth: data.dateOfBirth,
+      address: data.address,
       status: data.status,
+      workStatus: data.workStatus,
       notes: data.notes,
       avatarUrl: data.avatarUrl,
+      customPermissions: data.customPermissions,
     };
 
     let res = await fetch(endpoint, {

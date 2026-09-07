@@ -2,9 +2,9 @@ import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
-import { initializeApp, getApps, App, cert } from 'firebase-admin/app';
-import { getFirestore, Firestore } from 'firebase-admin/firestore';
-import { getAuth, Auth, UserRecord } from 'firebase-admin/auth';
+import type { App } from 'firebase-admin/app';
+import type { Firestore } from 'firebase-admin/firestore';
+import type { Auth, UserRecord } from 'firebase-admin/auth';
 
 const app = express();
 const PORT = 3000;
@@ -13,9 +13,15 @@ app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
 // Ensure upload directory exists for hosting upload (Firebase Spark compatibility)
-const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
+const uploadsDir = process.env.VERCEL
+  ? path.join('/tmp', 'uploads')
+  : path.join(process.cwd(), 'public', 'uploads');
+try {
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+} catch (e) {
+  // Read-only filesystem safe
 }
 app.use('/uploads', express.static(uploadsDir));
 
@@ -64,82 +70,15 @@ export function sendApiResponse(
   });
 }
 
-// 1. Initialize Firebase Admin SDK
-let firebaseAdminApp: App | null = null;
-let adminDb: Firestore | null = null;
-let adminAuth: Auth | null = null;
-let isAdminSdkExplicitlyConfigured = false;
+// 1. Initialize Firebase Admin SDK using unified library
+import {
+  initFirebaseAdmin,
+  getAdminAuth,
+  getAdminDb,
+  isAdminConfigured,
+} from './api/_lib/firebaseAdmin';
 
-try {
-  let config: any = {};
-  const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
-  if (fs.existsSync(configPath)) {
-    config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-  }
-
-  const projectId =
-    config.projectId ||
-    process.env.FIREBASE_PROJECT_ID ||
-    process.env.VITE_FIREBASE_PROJECT_ID ||
-    'airy-cogency-503707-p1';
-  const databaseId = config.firestoreDatabaseId || '(default)';
-
-  // Check for Firebase Admin credentials on Vercel or other cloud environments
-  let adminCredential: any = undefined;
-  const rawServiceAccount =
-    process.env.FIREBASE_SERVICE_ACCOUNT_KEY ||
-    process.env.FIREBASE_ADMIN_CREDENTIAL ||
-    process.env.FIREBASE_CONFIG_JSON;
-
-  if (rawServiceAccount) {
-    try {
-      const trimmed = rawServiceAccount.trim();
-      const parsed = trimmed.startsWith('{')
-        ? JSON.parse(trimmed)
-        : JSON.parse(Buffer.from(trimmed, 'base64').toString('utf8'));
-      adminCredential = cert(parsed);
-      isAdminSdkExplicitlyConfigured = true;
-      console.log('[Firebase Admin] Service account credential loaded from environment variable.');
-    } catch (parseErr: any) {
-      console.warn('[Firebase Admin] Notice: could not parse FIREBASE_SERVICE_ACCOUNT_KEY JSON:', parseErr.message);
-    }
-  } else if (process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_CLIENT_EMAIL) {
-    try {
-      adminCredential = cert({
-        projectId: process.env.FIREBASE_PROJECT_ID || projectId,
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-      });
-      isAdminSdkExplicitlyConfigured = true;
-      console.log('[Firebase Admin] Credential loaded from FIREBASE_PRIVATE_KEY and FIREBASE_CLIENT_EMAIL.');
-    } catch (certErr: any) {
-      console.warn('[Firebase Admin] Notice: could not load cert from private key:', certErr.message);
-    }
-  }
-
-  const existingApps = getApps();
-  if (!existingApps.length) {
-    firebaseAdminApp = initializeApp({
-      projectId,
-      ...(adminCredential ? { credential: adminCredential } : {}),
-      storageBucket: config.storageBucket,
-    });
-  } else {
-    firebaseAdminApp = existingApps[0]!;
-  }
-
-  adminAuth = getAuth(firebaseAdminApp);
-
-  if (databaseId && databaseId !== '(default)') {
-    adminDb = getFirestore(firebaseAdminApp, databaseId);
-  } else {
-    adminDb = getFirestore(firebaseAdminApp);
-  }
-
-  console.log(`[Firebase Admin] Initialized successfully with project: ${projectId}, database: ${databaseId}`);
-} catch (err: any) {
-  console.error('[Firebase Admin] Initialization warning:', err.message);
-}
+const { auth: adminAuth, db: adminDb } = initFirebaseAdmin();
 
 // 2. Audit Log Helper
 function sanitizeFirestoreData<T extends Record<string, any>>(obj: T): T {
@@ -943,27 +882,55 @@ const handleAdminUpdateUser = async (req: AuthenticatedRequest, res: Response): 
     return;
   }
 
-  // Protection: prevent locking or making the last active admin resigned
-  if ((status === 'LOCKED' || workStatus === 'RESIGNED') && (await isLastAdmin(uid))) {
+  // Input Validation
+  if (fullName !== undefined && (!fullName || !String(fullName).trim())) {
     sendApiResponse(res, 400, {
       success: false,
-      errorCode: 'LAST_ADMIN_PROTECTED',
-      message: 'Không thể khóa hoặc cho nghỉ việc Quản trị viên cuối cùng của hệ thống.',
+      errorCode: 'INVALID_NAME',
+      message: 'Họ và tên nhân sự không được để trống.',
     });
     return;
   }
 
-  if (!adminDb) {
+  if (email !== undefined) {
+    const cleanEmail = String(email).trim().toLowerCase();
+    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      sendApiResponse(res, 400, {
+        success: false,
+        errorCode: 'INVALID_EMAIL',
+        message: 'Định dạng email không hợp lệ. Vui lòng kiểm tra lại.',
+      });
+      return;
+    }
+  }
+
+  if (phone !== undefined && String(phone).trim()) {
+    const cleanPhone = String(phone).trim().replace(/[\s.-]/g, '');
+    if (!/^(0|\+84)[0-9]{8,11}$/.test(cleanPhone)) {
+      sendApiResponse(res, 400, {
+        success: false,
+        errorCode: 'INVALID_PHONE',
+        message: 'Số điện thoại không đúng định dạng Việt Nam (bắt đầu bằng 0 hoặc +84, từ 9 đến 11 số).',
+      });
+      return;
+    }
+  }
+
+  const db = getAdminDb() || adminDb;
+  const auth = getAdminAuth() || adminAuth;
+
+  if (!db) {
     sendApiResponse(res, 503, {
       success: false,
       errorCode: 'BACKEND_NOT_CONFIGURED',
-      message: 'Dịch vụ Firestore phía máy chủ chưa sẵn sàng.',
+      message: 'Dịch vụ quản trị nhân sự chưa được cấu hình',
+      details: 'Dịch vụ Firestore phía máy chủ chưa sẵn sàng.',
     });
     return;
   }
 
   try {
-    const userDocRef = adminDb.collection('users').doc(uid);
+    const userDocRef = db.collection('users').doc(uid);
     const userSnap = await userDocRef.get();
 
     if (!userSnap.exists) {
@@ -976,11 +943,22 @@ const handleAdminUpdateUser = async (req: AuthenticatedRequest, res: Response): 
     }
 
     const beforeData = userSnap.data() || {};
-    const finalName = displayName || fullName || beforeData.fullName || beforeData.displayName || '';
+    const finalName = fullName || displayName || beforeData.fullName || beforeData.displayName || '';
+
+    // Protection: prevent locking, resigning or demoting the last active admin
+    const isDemotingAdmin = Boolean(role && role !== 'ADMIN' && beforeData.role === 'ADMIN');
+    if ((status === 'LOCKED' || workStatus === 'RESIGNED' || isDemotingAdmin) && (await isLastAdmin(uid))) {
+      sendApiResponse(res, 400, {
+        success: false,
+        errorCode: 'LAST_ADMIN_PROTECTED',
+        message: 'Không thể hạ quyền, khóa hoặc cho nghỉ việc Quản trị viên cuối cùng của hệ thống. Phải có ít nhất 1 Admin hoạt động.',
+      });
+      return;
+    }
 
     // Check duplicate employeeCode if changed
     if (employeeCode && employeeCode.trim().toUpperCase() !== (beforeData.employeeCode || '').toUpperCase()) {
-      const existingCodeSnap = await adminDb
+      const existingCodeSnap = await db
         .collection('users')
         .where('employeeCode', '==', employeeCode.trim().toUpperCase())
         .limit(1)
@@ -999,7 +977,7 @@ const handleAdminUpdateUser = async (req: AuthenticatedRequest, res: Response): 
     // Check duplicate email if changed
     if (email && email.trim().toLowerCase() !== (beforeData.email || '').toLowerCase()) {
       const newEmail = email.trim().toLowerCase();
-      const existingEmailSnap = await adminDb
+      const existingEmailSnap = await db
         .collection('users')
         .where('email', '==', newEmail)
         .limit(1)
@@ -1015,32 +993,48 @@ const handleAdminUpdateUser = async (req: AuthenticatedRequest, res: Response): 
       }
     }
 
+    // Prepare auth rollback state for compensation
+    const authOriginal: Record<string, any> = {
+      displayName: beforeData.fullName || beforeData.displayName,
+      email: beforeData.email,
+      disabled: beforeData.status === 'LOCKED' || beforeData.workStatus === 'RESIGNED',
+    };
+    let authWasUpdated = false;
+
     // Update Firebase Auth user if available
-    if (adminAuth) {
+    if (auth) {
       try {
         const authUpdates: Record<string, any> = {};
         if (finalName) authUpdates.displayName = finalName;
         if (email && email.trim().toLowerCase() !== (beforeData.email || '').toLowerCase()) {
           authUpdates.email = email.trim().toLowerCase();
         }
-        if (phone && phone.startsWith('+')) {
-          authUpdates.phoneNumber = phone.trim();
+        if (phone && String(phone).trim().startsWith('+')) {
+          authUpdates.phoneNumber = String(phone).trim();
         }
-        if (status === 'LOCKED') {
+        if (status === 'LOCKED' || workStatus === 'RESIGNED') {
           authUpdates.disabled = true;
-        } else if (status === 'ACTIVE') {
+        } else if (status === 'ACTIVE' && workStatus !== 'RESIGNED') {
           authUpdates.disabled = false;
         }
 
         if (Object.keys(authUpdates).length > 0) {
-          await adminAuth.updateUser(uid, authUpdates);
+          await auth.updateUser(uid, authUpdates);
+          authWasUpdated = true;
+        }
+
+        // If resigned or locked, revoke all refresh tokens immediately
+        if (workStatus === 'RESIGNED' || status === 'LOCKED') {
+          await auth.revokeRefreshTokens(uid).catch(() => {});
         }
 
         // Update custom user claims if role changed
         if (role && role !== beforeData.role) {
-          await adminAuth.setCustomUserClaims(uid, { role });
-          // Revoke refresh tokens to force re-issue of token with new claims
-          await adminAuth.revokeRefreshTokens(uid).catch(() => {});
+          await auth.setCustomUserClaims(uid, {
+            role,
+            admin: role === 'ADMIN',
+          });
+          await auth.revokeRefreshTokens(uid).catch(() => {});
         }
       } catch (authErr: any) {
         console.warn('[adminUpdateUser] Auth update note:', authErr.message);
@@ -1066,12 +1060,17 @@ const handleAdminUpdateUser = async (req: AuthenticatedRequest, res: Response): 
       updatePayload.displayName = finalName;
     }
     if (email !== undefined) updatePayload.email = email.trim().toLowerCase();
-    if (phone !== undefined) updatePayload.phone = phone.trim();
+    if (phone !== undefined) updatePayload.phone = String(phone).trim();
     if (employeeCode !== undefined) updatePayload.employeeCode = employeeCode.trim().toUpperCase();
     if (role !== undefined) updatePayload.role = role;
     if (roleName !== undefined) updatePayload.roleName = roleName;
     if (status !== undefined) updatePayload.status = status;
-    if (workStatus !== undefined) updatePayload.workStatus = workStatus;
+    if (workStatus !== undefined) {
+      updatePayload.workStatus = workStatus;
+      if (workStatus === 'RESIGNED') {
+        updatePayload.status = 'LOCKED';
+      }
+    }
     if (dateOfBirth !== undefined) updatePayload.dateOfBirth = dateOfBirth;
     if (address !== undefined) updatePayload.address = address;
     if (department !== undefined) updatePayload.department = department;
@@ -1082,10 +1081,42 @@ const handleAdminUpdateUser = async (req: AuthenticatedRequest, res: Response): 
     if (notes !== undefined) updatePayload.notes = notes;
     if (avatarUrl !== undefined) updatePayload.avatarUrl = avatarUrl;
     if (customPermissions !== undefined) updatePayload.customPermissions = customPermissions;
-    if (roleHistory !== undefined) updatePayload.roleHistory = roleHistory;
+
+    // Record roleHistory if role changed from this form
+    if (role && role !== beforeData.role) {
+      const historyEntry = {
+        fromRole: beforeData.role || 'AGENT',
+        fromRoleName: beforeData.roleName || beforeData.role || 'Môi giới',
+        toRole: role,
+        toRoleName: roleName || role,
+        changedAt: now,
+        changedBy: req.adminUser?.uid || 'ADMIN',
+        changedByName: req.adminUser?.name || 'Quản trị viên',
+        reason: notes || 'Cập nhật chức vụ từ hồ sơ nhân sự',
+      };
+      const existingHistory = Array.isArray(beforeData.roleHistory) ? [...beforeData.roleHistory] : [];
+      existingHistory.push(historyEntry);
+      updatePayload.roleHistory = existingHistory;
+    } else if (roleHistory !== undefined) {
+      updatePayload.roleHistory = roleHistory;
+    }
 
     const sanitizedPayload = sanitizeFirestoreData(updatePayload);
-    await userDocRef.update(sanitizedPayload);
+    try {
+      await userDocRef.update(sanitizedPayload);
+    } catch (dbErr: any) {
+      // Rollback Auth changes if Firestore update fails
+      if (authWasUpdated && auth) {
+        await auth.updateUser(uid, authOriginal).catch(() => {});
+        if (beforeData.role) {
+          await auth.setCustomUserClaims(uid, {
+            role: beforeData.role,
+            admin: beforeData.role === 'ADMIN',
+          }).catch(() => {});
+        }
+      }
+      throw dbErr;
+    }
 
     const afterData = { ...beforeData, ...sanitizedPayload };
 
@@ -1304,20 +1335,23 @@ app.post('/api/admin/resolve-orphan-user', requireAdminAuth, async (req: Authent
 
 // 3. adminSetUserRole & changeUserRole
 const handleAdminSetUserRole = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-  const { uid, newRole, newRoleName, reason } = req.body;
+  const { uid, newRole, role, newRoleName, roleName, reason } = req.body;
   const ip = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '';
   const userAgent = req.headers['user-agent'] || '';
 
-  if (!uid || !newRole) {
+  const targetRole = newRole || role;
+  const targetRoleName = newRoleName || roleName;
+
+  if (!uid || !targetRole) {
     sendApiResponse(res, 400, {
       success: false,
       errorCode: 'INVALID_INPUT',
-      message: 'Thiếu UID người dùng hoặc vai trò mới.',
+      message: 'Thiếu mã nhân viên (UID) hoặc chức vụ mới.',
     });
     return;
   }
 
-  const cleanRole = String(newRole).trim().toUpperCase();
+  const cleanRole = String(targetRole).trim().toUpperCase();
   if (!cleanRole || cleanRole.length < 2) {
     sendApiResponse(res, 400, {
       success: false,
@@ -1327,17 +1361,21 @@ const handleAdminSetUserRole = async (req: AuthenticatedRequest, res: Response):
     return;
   }
 
-  if (!adminDb) {
+  const db = getAdminDb() || adminDb;
+  const auth = getAdminAuth() || adminAuth;
+
+  if (!db) {
     sendApiResponse(res, 503, {
       success: false,
       errorCode: 'BACKEND_NOT_CONFIGURED',
-      message: 'Dịch vụ Firestore phía máy chủ chưa sẵn sàng.',
+      message: 'Dịch vụ quản trị nhân sự chưa được cấu hình',
+      details: 'Dịch vụ Firestore phía máy chủ chưa sẵn sàng.',
     });
     return;
   }
 
   try {
-    const userDocRef = adminDb.collection('users').doc(uid);
+    const userDocRef = db.collection('users').doc(uid);
     const userSnap = await userDocRef.get();
     if (!userSnap.exists) {
       sendApiResponse(res, 404, {
@@ -1351,7 +1389,7 @@ const handleAdminSetUserRole = async (req: AuthenticatedRequest, res: Response):
     const userData = userSnap.data()!;
     const oldRole = userData.role || 'AGENT';
     const oldRoleName = userData.roleName || oldRole;
-    const effectiveNewRoleName = newRoleName || cleanRole;
+    const effectiveNewRoleName = targetRoleName || cleanRole;
 
     // Protection: Prevent demoting the last Admin
     if (oldRole === 'ADMIN' && cleanRole !== 'ADMIN') {
@@ -1367,13 +1405,13 @@ const handleAdminSetUserRole = async (req: AuthenticatedRequest, res: Response):
     }
 
     // Update Custom Claims in Firebase Auth if available
-    if (adminAuth) {
+    if (auth) {
       try {
-        await adminAuth.setCustomUserClaims(uid, {
+        await auth.setCustomUserClaims(uid, {
           role: cleanRole,
           admin: cleanRole === 'ADMIN',
         });
-        await adminAuth.revokeRefreshTokens(uid);
+        await auth.revokeRefreshTokens(uid).catch(() => {});
       } catch (authErr: any) {
         console.warn('[adminSetUserRole] Warning updating custom claims:', authErr.message);
       }
@@ -1395,15 +1433,16 @@ const handleAdminSetUserRole = async (req: AuthenticatedRequest, res: Response):
     const updatedHistory = [...existingHistory, historyEntry];
 
     // Update role and roleHistory in Cloud Firestore
-    await userDocRef.update(
-      sanitizeFirestoreData({
-        role: cleanRole,
-        roleName: effectiveNewRoleName,
-        roleHistory: updatedHistory,
-        updatedAt: now,
-        updatedBy: req.adminUser?.uid,
-      })
-    );
+    const updatedFields = {
+      role: cleanRole,
+      roleName: effectiveNewRoleName,
+      roleHistory: updatedHistory,
+      updatedAt: now,
+      updatedBy: req.adminUser?.uid,
+    };
+
+    await userDocRef.update(sanitizeFirestoreData(updatedFields));
+    const updatedUserDoc = { ...userData, ...updatedFields };
 
     const logDesc = `${req.adminUser?.name || 'Quản trị viên'} đổi chức vụ ${userData.fullName} từ ${oldRoleName} thành ${effectiveNewRoleName}.${reason ? ` Lý do: ${reason}` : ''}`;
 
@@ -1423,9 +1462,16 @@ const handleAdminSetUserRole = async (req: AuthenticatedRequest, res: Response):
     sendApiResponse(res, 200, {
       success: true,
       message: `Đã luân chuyển chức vụ thành công: ${userData.fullName} hiện là ${effectiveNewRoleName}.`,
+      data: {
+        role: cleanRole,
+        roleName: effectiveNewRoleName,
+        roleHistory: updatedHistory,
+        user: updatedUserDoc,
+      },
       role: cleanRole,
       roleName: effectiveNewRoleName,
       roleHistory: updatedHistory,
+      user: updatedUserDoc,
     });
   } catch (err: any) {
     console.error('[adminSetUserRole] Error:', err);
@@ -1658,25 +1704,86 @@ app.post('/api/admin/transfer-user-team', requireAdminAuth, async (req: Authenti
 
 // 3d. Dynamic Roles Management (Quản lý chức vụ & phân quyền động)
 app.get('/api/admin/roles', requireAdminAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-  if (!adminDb) {
+  const db = getAdminDb() || adminDb;
+  if (!db) {
     sendApiResponse(res, 503, {
       success: false,
       errorCode: 'BACKEND_NOT_CONFIGURED',
-      message: 'Dịch vụ Firestore chưa sẵn sàng.',
+      message: 'Dịch vụ quản trị nhân sự chưa được cấu hình',
+      details: 'Dịch vụ Firestore phía máy chủ chưa sẵn sàng.',
     });
     return;
   }
 
   try {
-    const rolesSnap = await adminDb.collection('roles').get();
-    const roles = rolesSnap.docs.map((doc) => ({
+    const rolesSnap = await db.collection('roles').get();
+    let roles = rolesSnap.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
     }));
 
+    if (roles.length === 0) {
+      const DEFAULT_SYSTEM_ROLES = [
+        {
+          id: 'role_admin',
+          code: 'ADMIN',
+          name: 'Quản trị viên',
+          description: 'Toàn quyền quản trị hệ thống, dữ liệu, bảo mật và phân quyền.',
+          isSystem: true,
+          isActive: true,
+          permissions: ['ALL'],
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: 'role_team_leader',
+          code: 'TEAM_LEADER',
+          name: 'Trưởng nhóm',
+          description: 'Quản lý thành viên trong nhóm, duyệt giao dịch và nguồn hàng của nhóm.',
+          isSystem: true,
+          isActive: true,
+          permissions: [
+            'VIEW_CUSTOMERS',
+            'CREATE_CUSTOMERS',
+            'EDIT_CUSTOMERS',
+            'VIEW_PROPERTIES',
+            'CREATE_PROPERTIES',
+            'EDIT_PROPERTIES',
+            'VIEW_TEAM_DEALS',
+            'APPROVE_TEAM_DEALS',
+          ],
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: 'role_agent',
+          code: 'AGENT',
+          name: 'Môi giới',
+          description: 'Khai thác nguồn hàng, chăm sóc khách hàng và thực hiện giao dịch bất động sản.',
+          isSystem: true,
+          isActive: true,
+          permissions: [
+            'VIEW_CUSTOMERS',
+            'CREATE_CUSTOMERS',
+            'EDIT_CUSTOMERS',
+            'VIEW_PROPERTIES',
+            'CREATE_PROPERTIES',
+            'EDIT_PROPERTIES',
+          ],
+          createdAt: new Date().toISOString(),
+        },
+      ];
+
+      const batch = db.batch();
+      for (const r of DEFAULT_SYSTEM_ROLES) {
+        batch.set(db.collection('roles').doc(r.id), r);
+      }
+      await batch.commit().catch((bErr) => console.warn('Could not auto-seed roles collection:', bErr.message));
+      roles = DEFAULT_SYSTEM_ROLES;
+    }
+
     sendApiResponse(res, 200, {
       success: true,
       message: 'Lấy danh sách chức vụ thành công',
+      data: { roles },
       roles,
     });
   } catch (err: any) {

@@ -43,19 +43,39 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
   const [isUploadingAvatar, setIsUploadingAvatar] = useState<boolean>(false);
 
   const [formData, setFormData] = useState({
-    fullName: user.fullName || user.displayName || '',
-    phone: user.phone || '',
-    email: user.email || '',
-    avatarUrl: user.avatarUrl || '',
-    dateOfBirth: user.dateOfBirth || '',
+    fullName: user.fullName || (user as any).displayName || (user as any).name || '',
+    phone: user.phone || (user as any).phoneNumber || (user as any).tel || '',
+    email: user.email || (user as any).mail || (user as any).userEmail || '',
+    avatarUrl: user.avatarUrl || (user as any).photoURL || '',
+    dateOfBirth: user.dateOfBirth || (user as any).dob || (user as any).birthDate || '',
     address: user.address || '',
-    department: user.department || '',
+    department: user.department || (user as any).dept || '',
     teamId: user.teamId || '',
     role: user.role || 'AGENT',
     roleName: user.roleName || '',
     workStatus: (user.workStatus || (user.status === 'LOCKED' ? 'RESIGNED' : 'ACTIVE')) as WorkStatus,
     notes: user.notes || '',
   });
+
+  // Keep form data synchronized whenever user prop changes
+  React.useEffect(() => {
+    if (user) {
+      setFormData({
+        fullName: user.fullName || (user as any).displayName || (user as any).name || '',
+        phone: user.phone || (user as any).phoneNumber || (user as any).tel || '',
+        email: user.email || (user as any).mail || (user as any).userEmail || '',
+        avatarUrl: user.avatarUrl || (user as any).photoURL || '',
+        dateOfBirth: user.dateOfBirth || (user as any).dob || (user as any).birthDate || '',
+        address: user.address || '',
+        department: user.department || (user as any).dept || '',
+        teamId: user.teamId || '',
+        role: user.role || 'AGENT',
+        roleName: user.roleName || '',
+        workStatus: (user.workStatus || (user.status === 'LOCKED' ? 'RESIGNED' : 'ACTIVE')) as WorkStatus,
+        notes: user.notes || '',
+      });
+    }
+  }, [user]);
 
   const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -95,13 +115,28 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.fullName.trim()) {
+    const cleanName = formData.fullName.trim();
+    const cleanEmail = formData.email.trim().toLowerCase();
+    const cleanPhone = formData.phone.trim();
+
+    if (!cleanName) {
       error('Thiếu thông tin', 'Vui lòng nhập họ và tên nhân sự.');
       return;
     }
-    if (!formData.email.trim()) {
+    if (!cleanEmail) {
       error('Thiếu thông tin', 'Vui lòng nhập email nhân sự.');
       return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      error('Sai định dạng email', 'Email không đúng định dạng. Vui lòng kiểm tra lại.');
+      return;
+    }
+    if (cleanPhone) {
+      const numericPhone = cleanPhone.replace(/[\s.-]/g, '');
+      if (!/^(0|\+84)[0-9]{8,11}$/.test(numericPhone)) {
+        error('Sai định dạng số điện thoại', 'Số điện thoại phải thuộc định dạng Việt Nam (bắt đầu bằng 0 hoặc +84, từ 9 đến 11 số).');
+        return;
+      }
     }
 
     try {
@@ -113,10 +148,10 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
       // Prepare payload with null for empty fields to maintain clean Firestore documents
       const payload = {
         uid: user.id,
-        fullName: formData.fullName.trim(),
-        displayName: formData.fullName.trim(),
-        email: formData.email.trim().toLowerCase(),
-        phone: formData.phone.trim(),
+        fullName: cleanName,
+        displayName: cleanName,
+        email: cleanEmail,
+        phone: cleanPhone,
         avatarUrl: formData.avatarUrl.trim() || undefined,
         dateOfBirth: formData.dateOfBirth.trim() || undefined,
         address: formData.address.trim() || undefined,

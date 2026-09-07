@@ -397,7 +397,17 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const unsubUsers = onSnapshot(
       collection(db, 'users'),
       (snapshot) => {
-        const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as User));
+        const loaded = snapshot.docs.map((d) => {
+          const data = d.data();
+          return {
+            id: d.id,
+            ...data,
+            fullName: data.fullName || data.displayName || data.name || '',
+            displayName: data.displayName || data.fullName || data.name || '',
+            phone: data.phone || data.phoneNumber || data.tel || '',
+            email: data.email || data.mail || data.userEmail || '',
+          } as unknown as User;
+        });
         setUsers(loaded);
       },
       (err) => {

@@ -7,14 +7,32 @@ import { sanitizeFirestoreData } from '../../src/utils/firestoreSanitizer';
 let adminApp: App | null = null;
 let adminAuthInstance: Auth | null = null;
 let adminDbInstance: Firestore | null = null;
+let adminConfigured = false;
 
-export function initFirebaseAdmin(): { app: App | null; auth: Auth | null; db: Firestore | null } {
+function normalizePrivateKey(rawKey: string): string {
+  let key = rawKey.trim();
+  if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
+    key = key.slice(1, -1);
+  }
+  key = key.replace(/\\n/g, '\n');
+  if (!key.includes('-----BEGIN PRIVATE KEY-----')) {
+    try {
+      const decoded = Buffer.from(key, 'base64').toString('utf8');
+      if (decoded.includes('-----BEGIN PRIVATE KEY-----')) {
+        key = decoded.replace(/\\n/g, '\n');
+      }
+    } catch {}
+  }
+  return key;
+}
+
+export function initFirebaseAdmin(): { app: App | null; auth: Auth | null; db: Firestore | null; isConfigured: boolean } {
   const existingApps = getApps();
   if (existingApps.length > 0) {
     adminApp = existingApps[0];
     adminAuthInstance = getAuth(adminApp);
     adminDbInstance = getFirestore(adminApp);
-    return { app: adminApp, auth: adminAuthInstance, db: adminDbInstance };
+    return { app: adminApp, auth: adminAuthInstance, db: adminDbInstance, isConfigured: adminConfigured };
   }
 
   const projectId =
@@ -30,6 +48,14 @@ export function initFirebaseAdmin(): { app: App | null; auth: Auth | null; db: F
     process.env.FIREBASE_ADMIN_CREDENTIAL ||
     process.env.FIREBASE_CONFIG_JSON;
 
+  const clientEmail =
+    process.env.FIREBASE_ADMIN_CLIENT_EMAIL ||
+    process.env.FIREBASE_CLIENT_EMAIL;
+
+  const rawPrivateKey =
+    process.env.FIREBASE_ADMIN_PRIVATE_KEY ||
+    process.env.FIREBASE_PRIVATE_KEY;
+
   if (rawServiceAccount) {
     try {
       const trimmed = rawServiceAccount.trim();
@@ -37,18 +63,21 @@ export function initFirebaseAdmin(): { app: App | null; auth: Auth | null; db: F
         ? JSON.parse(trimmed)
         : JSON.parse(Buffer.from(trimmed, 'base64').toString('utf8'));
       credential = cert(parsed);
+      adminConfigured = true;
     } catch (e: any) {
-      console.warn('[firebaseAdmin] Lỗi đọc FIREBASE_SERVICE_ACCOUNT_KEY:', e.message);
+      console.warn('[firebaseAdmin] Warning parsing FIREBASE_SERVICE_ACCOUNT_KEY JSON:', e.message);
     }
-  } else if (process.env.FIREBASE_ADMIN_CLIENT_EMAIL && process.env.FIREBASE_ADMIN_PRIVATE_KEY) {
+  } else if (clientEmail && rawPrivateKey) {
     try {
+      const privateKey = normalizePrivateKey(rawPrivateKey);
       credential = cert({
         projectId,
-        clientEmail: process.env.FIREBASE_ADMIN_CLIENT_EMAIL,
-        privateKey: process.env.FIREBASE_ADMIN_PRIVATE_KEY.replace(/\\n/g, '\n'),
+        clientEmail: clientEmail.trim(),
+        privateKey,
       });
+      adminConfigured = true;
     } catch (e: any) {
-      console.warn('[firebaseAdmin] Lỗi nạp cert từ FIREBASE_ADMIN_PRIVATE_KEY:', e.message);
+      console.warn('[firebaseAdmin] Warning loading cert from clientEmail & privateKey:', e.message);
     }
   }
 
@@ -59,12 +88,23 @@ export function initFirebaseAdmin(): { app: App | null; auth: Auth | null; db: F
     });
     adminAuthInstance = getAuth(adminApp);
     adminDbInstance = getFirestore(adminApp);
-    console.log('[firebaseAdmin] Khởi tạo Firebase Admin thành công với project:', projectId);
+    if (!credential) {
+      // In cloud without cert, might work with ADC or be unconfigured
+      adminConfigured = Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.K_SERVICE);
+    }
+    console.log('[firebaseAdmin] Firebase Admin initialized with project:', projectId, 'configured:', adminConfigured);
   } catch (err: any) {
-    console.warn('[firebaseAdmin] Khởi tạo Firebase Admin cảnh báo:', err.message);
+    console.warn('[firebaseAdmin] Firebase Admin init error:', err.message);
   }
 
-  return { app: adminApp, auth: adminAuthInstance, db: adminDbInstance };
+  return { app: adminApp, auth: adminAuthInstance, db: adminDbInstance, isConfigured: adminConfigured };
+}
+
+export function isAdminConfigured(): boolean {
+  if (!adminApp) {
+    initFirebaseAdmin();
+  }
+  return adminConfigured;
 }
 
 export function getAdminAuth(): Auth | null {
