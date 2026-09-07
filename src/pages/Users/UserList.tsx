@@ -244,11 +244,11 @@ export const UserList: React.FC = () => {
     if (u) {
       setEditingUser(u);
       setUserFormData({
-        fullName: u.fullName,
-        email: u.email,
-        phone: u.phone,
-        employeeCode: u.employeeCode,
-        role: u.role,
+        fullName: u.fullName || (u as any).displayName || (u as any).name || '',
+        email: u.email || (u as any).mail || (u as any).userEmail || '',
+        phone: u.phone || (u as any).phoneNumber || (u as any).tel || '',
+        employeeCode: u.employeeCode || '',
+        role: u.role || 'AGENT',
         teamId: u.teamId || '',
         notes: u.notes || '',
         tempPassword: '',
