@@ -36,15 +36,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// URL normalizer for Vercel Serverless Function & Reverse Proxy compatibility:
-// If request arrives as /admin/... instead of /api/admin/..., prefix /api so Express routes match seamlessly
-app.use((req, res, next) => {
-  if (req.url && !req.url.startsWith('/api') && !req.url.startsWith('/uploads')) {
-    req.url = '/api' + (req.url.startsWith('/') ? req.url : '/' + req.url);
-  }
-  next();
-});
-
 // Set global JSON header and Request ID for all /api endpoints
 app.use('/api', (req, res, next) => {
   res.setHeader('Content-Type', 'application/json');
