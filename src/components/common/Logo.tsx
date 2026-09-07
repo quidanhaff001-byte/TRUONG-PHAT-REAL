@@ -20,8 +20,14 @@ export const Logo: React.FC<LogoProps> = ({
   const [imageError, setImageError] = useState(false);
 
   const customLogoUrl = systemSettings?.logoUrl;
-  const companyName = systemSettings?.companyName || 'TRUONG PHAT REAL';
-  const slogan = systemSettings?.companySlogan || (variant === 'sidebar' ? 'Bất Động Sản Chuyên Nghiệp' : 'Hệ thống quản lý bất động sản nội bộ');
+  const companyName = systemSettings?.companyName || 'TRƯỜNG PHÁT REAL';
+  // If in sidebar, keep slogan concise so it fits comfortably within the 256px/288px sidebar without clipping or spilling
+  const defaultSidebarSlogan = 'Bất Động Sản Chuyên Nghiệp';
+  const slogan = variant === 'sidebar'
+    ? (systemSettings?.companySlogan && systemSettings.companySlogan !== 'Hệ thống quản lý bất động sản nội bộ chuyên nghiệp'
+        ? systemSettings.companySlogan
+        : defaultSidebarSlogan)
+    : (systemSettings?.companySlogan || 'Hệ thống quản lý bất động sản nội bộ');
 
   // Reset error flag if logo URL changes
   useEffect(() => {
@@ -73,15 +79,15 @@ export const Logo: React.FC<LogoProps> = ({
     return (
       <div
         onClick={onClick}
-        className={`flex items-center gap-3 ${onClick ? 'cursor-pointer' : ''} ${className}`}
+        className={`flex items-center gap-3 min-w-0 flex-1 overflow-hidden ${onClick ? 'cursor-pointer' : ''} ${className}`}
       >
-        {renderEmblem('w-10 h-10 text-lg rounded-xl')}
+        {renderEmblem('w-10 h-10 text-lg rounded-xl shrink-0')}
         {showText && (
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1 overflow-hidden">
             <div className="text-white font-black text-base tracking-tight leading-tight truncate">
               {companyName}
             </div>
-            <p className="text-[11px] text-[#D4AF37] font-medium truncate">
+            <p className="text-[11px] text-[#D4AF37] font-medium truncate block max-w-full" title={slogan}>
               {slogan}
             </p>
           </div>

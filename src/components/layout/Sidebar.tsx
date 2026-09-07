@@ -62,17 +62,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
 
       {/* Sidebar container */}
       <aside
-        className={`fixed top-0 left-0 bottom-0 z-50 w-64 lg:w-72 bg-[#001f3f] text-slate-100 flex flex-col border-r border-white/10 transition-transform duration-300 ease-in-out lg:translate-x-0 ${
+        className={`fixed top-0 left-0 bottom-0 z-50 w-64 lg:w-72 bg-[#001f3f] text-slate-100 flex flex-col border-r border-white/10 transition-transform duration-300 ease-in-out lg:translate-x-0 overflow-x-hidden ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
         {/* Brand Header */}
-        <div className="h-20 px-5 flex items-center justify-between border-b border-white/10 shrink-0 bg-[#001f3f]">
-          <Logo variant="sidebar" />
+        <div className="h-20 px-4 sm:px-5 flex items-center justify-between border-b border-white/10 shrink-0 bg-[#001f3f] overflow-hidden">
+          <Logo variant="sidebar" className="min-w-0 flex-1 overflow-hidden" />
 
           <button
             onClick={onClose}
-            className="p-1.5 text-gray-400 hover:text-white rounded-lg lg:hidden"
+            className="p-1.5 text-gray-400 hover:text-white rounded-lg lg:hidden shrink-0 ml-2"
             aria-label="Đóng menu"
           >
             <X className="w-5 h-5" />
