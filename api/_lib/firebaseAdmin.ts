@@ -2,7 +2,7 @@ import { initializeApp, getApps, getApp, cert, App } from 'firebase-admin/app';
 import { getAuth, Auth, DecodedIdToken, UserRecord } from 'firebase-admin/auth';
 import { getFirestore, Firestore, FieldValue } from 'firebase-admin/firestore';
 import { Request, Response, NextFunction } from 'express';
-import { sanitizeFirestoreData } from '../../src/utils/firestoreSanitizer';
+import { sanitizeFirestoreData } from '../../src/utils/firestoreSanitizer.js';
 
 let adminApp: App | null = null;
 let adminAuthInstance: Auth | null = null;

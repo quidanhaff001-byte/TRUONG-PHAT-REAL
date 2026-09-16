@@ -1,7 +1,7 @@
 import path from 'path';
 import express, { Request, Response } from 'express';
 import { createServer as createViteServer } from 'vite';
-import app from './api/app';
+import app from './api/app.js';
 
 const PORT = 3000;
 
@@ -30,6 +30,6 @@ if (!process.env.VERCEL) {
   startServer();
 }
 
-export * from './api/app';
+export * from './api/app.js';
 export default app;
 export { app };

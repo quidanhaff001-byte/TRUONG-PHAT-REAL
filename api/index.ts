@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import app from './app';
+import app from './app.js';
 
 export default function handler(req: Request, res: Response) {
   // On Vercel Serverless Function, if the request URL was rewritten without /api,
@@ -11,5 +11,4 @@ export default function handler(req: Request, res: Response) {
 }
 
 export { app };
-
 

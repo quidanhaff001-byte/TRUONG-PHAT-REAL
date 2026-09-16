@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { initFirebaseAdmin } from './_lib/firebaseAdmin';
+import { initFirebaseAdmin } from './_lib/firebaseAdmin.js';
 
 const MYSQL_API = 'https://api.anminhtown.vn';
 

@@ -75,7 +75,7 @@ import {
   getAdminAuth,
   getAdminDb,
   isAdminConfigured,
-} from './_lib/firebaseAdmin';
+} from './_lib/firebaseAdmin.js';
 
 const { auth: adminAuth, db: adminDb } = initFirebaseAdmin();
 
